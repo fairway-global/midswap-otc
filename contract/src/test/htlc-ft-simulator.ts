@@ -1,5 +1,6 @@
 // HTLC-FT contract test simulator
-// Wraps the compiled HTLC-FT contract (FungibleToken + HTLC escrow) for testing.
+// Wraps the compiled HTLC-FT contract (FungibleToken + concurrent HTLC escrow) for testing.
+// Supports multiple simultaneous swaps, each keyed by its hash lock.
 
 import {
   type CircuitContext,
@@ -167,10 +168,36 @@ export class HTLCFTSimulator {
     this.circuitContext = context;
   }
 
-  reclaim(): void {
+  reclaim(hash: Uint8Array): void {
     const { context } = this.contract.impureCircuits.reclaimAfterExpiry(
       this.circuitContext,
+      hash,
     );
     this.circuitContext = context;
+  }
+
+  // ===== Swap query helpers =====
+
+  isSwapActive(hash: Uint8Array): boolean {
+    const state = this.getLedger();
+    return state.htlcAmounts.member(hash) && state.htlcAmounts.lookup(hash) > 0n;
+  }
+
+  getSwapAmount(hash: Uint8Array): bigint {
+    const state = this.getLedger();
+    if (!state.htlcAmounts.member(hash)) return 0n;
+    return state.htlcAmounts.lookup(hash);
+  }
+
+  getSwapExpiry(hash: Uint8Array): bigint {
+    const state = this.getLedger();
+    if (!state.htlcExpiries.member(hash)) return 0n;
+    return state.htlcExpiries.lookup(hash);
+  }
+
+  getSwapReceiver(hash: Uint8Array): Uint8Array | null {
+    const state = this.getLedger();
+    if (!state.htlcReceivers.member(hash)) return null;
+    return state.htlcReceivers.lookup(hash);
   }
 }

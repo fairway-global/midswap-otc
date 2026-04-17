@@ -188,8 +188,8 @@ describe("Full cross-chain e2e: Midnight compact-runtime + Cardano Plutus CEK ma
     midnight.mint(aliceAddr, 1000n);
     midnight.deposit(1000n, hashLock, BigInt(NOW + ONE_HOUR * 2), bobMidnightAddr);
 
-    expect(midnight.getLedger().htlcActive).toBe(true);
-    expect(midnight.getLedger().htlcHash).toEqual(hashLock);
+    expect(midnight.isSwapActive(hashLock)).toBe(true);
+    expect(midnight.getSwapAmount(hashLock)).toBe(1000n);
 
     // ──── CARDANO: real Plutus CEK machine (compiled UPLC execution) ────
 
@@ -226,8 +226,8 @@ describe("Full cross-chain e2e: Midnight compact-runtime + Cardano Plutus CEK ma
     midnight.switchUser(bobMidnightKey);
     midnight.withdraw(SHARED_PREIMAGE);
 
-    expect(midnight.getLedger().htlcActive).toBe(false);
-    expect(midnight.getLedger().htlcAmount).toBe(0n);
+    expect(midnight.isSwapActive(hashLock)).toBe(false);
+    expect(midnight.getSwapAmount(hashLock)).toBe(0n);
 
     // ──── BOTH RUNTIMES VERIFIED THE SAME PREIMAGE ────
     // Midnight: persistentHash(preimage) == stored hash  (compact-runtime WASM)
@@ -268,8 +268,8 @@ describe("Full cross-chain e2e: Midnight compact-runtime + Cardano Plutus CEK ma
     // Midnight deadline expires later (2hr). Alice reclaims via compact-runtime.
     midnight.setBlockTime(NOW + ONE_HOUR * 2 + 1);
     midnight.switchUser(aliceMidnightKey);
-    midnight.reclaim();
-    expect(midnight.getLedger().htlcActive).toBe(false);
+    midnight.reclaim(hashLock);
+    expect(midnight.isSwapActive(hashLock)).toBe(false);
   });
 
   it("attack prevention: wrong preimage rejected by BOTH real runtimes", () => {
@@ -302,9 +302,10 @@ describe("Full cross-chain e2e: Midnight compact-runtime + Cardano Plutus CEK ma
     midnight.mint(aliceAddr, 1000n);
     midnight.deposit(1000n, hashLock, BigInt(NOW + ONE_HOUR), bobAddr);
 
+    // Wrong preimage → wrong hash → no matching swap in the Map
     midnight.switchUser(bobKey);
     expect(() => midnight.withdraw(wrongPreimage)).toThrow(
-      "Invalid preimage",
+      "No active HTLC",
     );
   });
 });

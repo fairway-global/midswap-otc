@@ -1,13 +1,12 @@
 // FungibleToken HTLC for cross-chain atomic swap (Midnight <-> Cardano).
 //
-// Integrates OpenZeppelin's FungibleToken standard for balance-based token
-// management. Instead of locking raw Zswap shielded coins, this contract
-// escrows FungibleToken balances — making it interoperable with any DApp
-// that uses the same ERC20-like token standard on Midnight.
+// Supports concurrent swaps: multiple HTLCs can be active simultaneously,
+// keyed by their hash lock. Each swap has independent amount, expiry, sender,
+// and receiver stored in parallel Maps.
 //
-// The HTLC logic (hash-time lock, preimage verification, deadline enforcement)
-// is identical to the original htlc.compact. Only the token model changes:
-// balances in a Map instead of shielded coins in the Merkle tree.
+// Integrates OpenZeppelin's FungibleToken standard for balance-based token
+// management. The HTLC escrows FungibleToken balances — making it interoperable
+// with any DApp that uses the same ERC20-like token standard on Midnight.
 
 pragma language_version >= 0.21.0;
 
@@ -16,13 +15,11 @@ import "vendor/openzeppelin/token/FungibleToken" prefix FT_;
 
 export { ZswapCoinPublicKey, ContractAddress, Either };
 
-// ===== HTLC Ledger State =====
-export ledger htlcHash: Bytes<32>;
-export ledger htlcAmount: Uint<128>;
-export ledger htlcActive: Boolean;
-export ledger htlcExpiryTime: Uint<64>;
-export ledger htlcSender: Bytes<32>;
-export ledger htlcReceiver: Bytes<32>;
+// ===== HTLC Ledger State (Maps keyed by hash lock for concurrent swaps) =====
+export ledger htlcAmounts: Map<Bytes<32>, Uint<128>>;
+export ledger htlcExpiries: Map<Bytes<32>, Uint<64>>;
+export ledger htlcSenders: Map<Bytes<32>, Bytes<32>>;
+export ledger htlcReceivers: Map<Bytes<32>, Bytes<32>>;
 
 constructor(
   tokenName: Opaque<"string">,
@@ -30,12 +27,6 @@ constructor(
   tokenDecimals: Uint<8>
 ) {
   FT_initialize(tokenName, tokenSymbol, tokenDecimals);
-  htlcActive = false;
-  htlcHash = pad(32, "");
-  htlcAmount = 0;
-  htlcExpiryTime = 0;
-  htlcSender = pad(32, "");
-  htlcReceiver = pad(32, "");
 }
 
 // ===== Token Operations (delegated to FungibleToken module) =====
@@ -64,17 +55,20 @@ export circuit mint(account: Either<ZswapCoinPublicKey, ContractAddress>, value:
   FT__mint(account, value);
 }
 
-// ===== HTLC Circuits =====
+// ===== HTLC Circuits (concurrent swaps via Maps) =====
 
 // Deposit tokens with a hash-time lock for cross-chain atomic swap.
-// Transfers the caller's FungibleToken balance to the contract's escrow.
+// Multiple swaps can be active concurrently, each identified by its hash lock.
 export circuit depositWithHashTimeLock(
     amount: Uint<128>,
     hash: Bytes<32>,
     expiryTime: Uint<64>,
     receiver: Bytes<32>
 ): [] {
-    assert(!htlcActive, "HTLC already active");
+    // Ensure this hash isn't already used for an active swap
+    // (amount == 0 is the sentinel for completed swaps since Map.delete() is unavailable)
+    assert(!htlcAmounts.member(disclose(hash)) || htlcAmounts.lookup(disclose(hash)) == 0,
+           "HTLC already active for this hash");
     assert(blockTimeLt(disclose(expiryTime)), "Expiry time must be in the future");
 
     // Transfer tokens from caller to contract (escrow)
@@ -82,57 +76,50 @@ export circuit depositWithHashTimeLock(
     const self = right<ZswapCoinPublicKey, ContractAddress>(kernel.self());
     FT__unsafeUncheckedTransfer(caller, self, disclose(amount));
 
-    // Record the HTLC parameters on the public ledger
-    htlcHash = disclose(hash);
-    htlcAmount = disclose(amount);
-    htlcExpiryTime = disclose(expiryTime);
-    htlcSender = disclose(ownPublicKey().bytes);
-    htlcReceiver = disclose(receiver);
-    htlcActive = true;
+    // Record the HTLC parameters
+    htlcAmounts.insert(disclose(hash), disclose(amount));
+    htlcExpiries.insert(disclose(hash), disclose(expiryTime));
+    htlcSenders.insert(disclose(hash), disclose(ownPublicKey().bytes));
+    htlcReceivers.insert(disclose(hash), disclose(receiver));
 }
 
 // Withdraw tokens by revealing the hash preimage.
+// The preimage uniquely identifies the swap: hash = persistentHash(preimage).
 // Only the designated receiver can call this, and only before expiry.
 export circuit withdrawWithPreimage(preimage: Bytes<32>): [] {
-    assert(htlcActive, "No active HTLC");
-    assert(blockTimeLte(htlcExpiryTime), "HTLC has expired");
-    assert(ownPublicKey().bytes == htlcReceiver, "Only designated receiver can withdraw");
+    // Compute hash from preimage — this IS the swap key
+    const hash = persistentHash<Bytes<32>>(disclose(preimage));
 
-    // Verify the preimage matches the stored hash
-    const computed = persistentHash<Bytes<32>>(disclose(preimage));
-    assert(computed == htlcHash, "Invalid preimage");
+    // Check swap exists and is active
+    assert(htlcAmounts.member(hash) && htlcAmounts.lookup(hash) > 0, "No active HTLC");
+    assert(blockTimeLte(htlcExpiries.lookup(hash)), "HTLC has expired");
+    assert(ownPublicKey().bytes == htlcReceivers.lookup(hash), "Only designated receiver can withdraw");
 
     // Transfer tokens from contract to receiver
+    const amount = htlcAmounts.lookup(hash);
     const self = right<ZswapCoinPublicKey, ContractAddress>(kernel.self());
     const receiverAddr = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    FT__unsafeUncheckedTransfer(self, receiverAddr, htlcAmount);
+    FT__unsafeUncheckedTransfer(self, receiverAddr, amount);
 
-    // Clear HTLC state
-    htlcActive = false;
-    htlcHash = pad(32, "");
-    htlcAmount = 0;
-    htlcExpiryTime = 0;
-    htlcSender = pad(32, "");
-    htlcReceiver = pad(32, "");
+    // Mark swap as completed (amount = 0 sentinel)
+    htlcAmounts.insert(hash, 0);
 }
 
 // Reclaim tokens after the HTLC has expired.
+// Takes the hash lock to identify which swap to reclaim.
 // Only the original sender can call this, and only after expiry.
-export circuit reclaimAfterExpiry(): [] {
-    assert(htlcActive, "No active HTLC");
-    assert(blockTimeGt(htlcExpiryTime), "HTLC has not expired yet");
-    assert(ownPublicKey().bytes == htlcSender, "Only original sender can reclaim");
+export circuit reclaimAfterExpiry(hash: Bytes<32>): [] {
+    // Check swap exists and is active
+    assert(htlcAmounts.member(disclose(hash)) && htlcAmounts.lookup(disclose(hash)) > 0, "No active HTLC");
+    assert(blockTimeGt(htlcExpiries.lookup(disclose(hash))), "HTLC has not expired yet");
+    assert(ownPublicKey().bytes == htlcSenders.lookup(disclose(hash)), "Only original sender can reclaim");
 
     // Transfer tokens from contract back to sender
+    const amount = htlcAmounts.lookup(disclose(hash));
     const self = right<ZswapCoinPublicKey, ContractAddress>(kernel.self());
     const senderAddr = left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey());
-    FT__unsafeUncheckedTransfer(self, senderAddr, htlcAmount);
+    FT__unsafeUncheckedTransfer(self, senderAddr, amount);
 
-    // Clear HTLC state
-    htlcActive = false;
-    htlcHash = pad(32, "");
-    htlcAmount = 0;
-    htlcExpiryTime = 0;
-    htlcSender = pad(32, "");
-    htlcReceiver = pad(32, "");
+    // Mark swap as completed (amount = 0 sentinel)
+    htlcAmounts.insert(disclose(hash), 0);
 }

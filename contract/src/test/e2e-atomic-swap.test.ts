@@ -68,9 +68,8 @@ describe("Cross-chain atomic swap: Midnight <-> Cardano", () => {
     const midnightExpiry = BigInt(NOW + ONE_HOUR * 2);
     midnight.deposit(1000n, hashLock, midnightExpiry, bobMidnightAddr);
 
-    const midnightState = midnight.getLedger();
-    expect(midnightState.htlcActive).toBe(true);
-    expect(midnightState.htlcHash).toEqual(hashLock);
+    expect(midnight.isSwapActive(hashLock)).toBe(true);
+    expect(midnight.getSwapAmount(hashLock)).toBe(1000n);
 
     // === Bob verifies Midnight deposit, then deposits on Cardano ===
     const cardanoDeadline = NOW + ONE_HOUR;
@@ -90,9 +89,8 @@ describe("Cross-chain atomic swap: Midnight <-> Cardano", () => {
     midnight.switchUser(bobMidnightKey);
     midnight.withdraw(preimage);
 
-    const finalState = midnight.getLedger();
-    expect(finalState.htlcActive).toBe(false);
-    expect(finalState.htlcAmount).toBe(0n);
+    expect(midnight.isSwapActive(hashLock)).toBe(false);
+    expect(midnight.getSwapAmount(hashLock)).toBe(0n);
   });
 
   it("allows both parties to reclaim if nobody claims (timeout path)", () => {
@@ -132,9 +130,9 @@ describe("Cross-chain atomic swap: Midnight <-> Cardano", () => {
     // Midnight HTLC expires later. Alice reclaims.
     midnight.setBlockTime(NOW + ONE_HOUR * 2 + 1);
     midnight.switchUser(aliceMidnightKey);
-    midnight.reclaim();
+    midnight.reclaim(hashLock);
 
-    expect(midnight.getLedger().htlcActive).toBe(false);
+    expect(midnight.isSwapActive(hashLock)).toBe(false);
   });
 
   it("prevents Bob from claiming on Midnight without the preimage", () => {
@@ -153,9 +151,10 @@ describe("Cross-chain atomic swap: Midnight <-> Cardano", () => {
     midnight.mint(aliceAddr, 1000n);
     midnight.deposit(1000n, hashLock, BigInt(NOW + ONE_HOUR), bobAddr);
 
+    // Wrong preimage → wrong hash → no matching swap
     midnight.switchUser(bobMidnightKey);
     expect(() => midnight.withdraw(randomBytes(32))).toThrow(
-      "Invalid preimage",
+      "No active HTLC",
     );
   });
 
@@ -246,7 +245,7 @@ describe("Cross-chain atomic swap: Midnight <-> Cardano", () => {
     midnight.switchUser(bobMidnightKey);
     midnight.withdraw(preimage);
 
-    expect(midnight.getLedger().htlcActive).toBe(false);
+    expect(midnight.isSwapActive(hashLock)).toBe(false);
     expect(cardano.getHTLC().active).toBe(false);
   });
 
@@ -309,7 +308,7 @@ describe("Cross-chain atomic swap: Midnight <-> Cardano", () => {
     midnight.switchUser(bobMidnightKey);
     midnight.withdraw(preimage1);
 
-    expect(midnight.getLedger().htlcActive).toBe(false);
+    expect(midnight.isSwapActive(hash1)).toBe(false);
     expect(cardano.getHTLC().active).toBe(false);
 
     // --- Round 2: new preimage, new deposit ---
@@ -329,7 +328,7 @@ describe("Cross-chain atomic swap: Midnight <-> Cardano", () => {
     midnight.switchUser(bobMidnightKey);
     midnight.withdraw(preimage2);
 
-    expect(midnight.getLedger().htlcActive).toBe(false);
+    expect(midnight.isSwapActive(hash2)).toBe(false);
     expect(cardano.getBalance(aliceCardano, "SWAP")).toBe(700n);
   });
 });
