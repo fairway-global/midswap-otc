@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@harmoniclabs/cbor": "^2.0.1",
+    "@harmoniclabs/pair": "^1.0.0",
     "@harmoniclabs/plutus-data": "^2.0.1",
     "@harmoniclabs/plutus-machine": "^3.0.2",
     "@harmoniclabs/uint8array-utils": "^1.0.4",

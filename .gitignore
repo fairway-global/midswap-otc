@@ -40,6 +40,9 @@ jspm_packages/
 # dotenv environment variables file
 .env
 
+# Wallet keys (sensitive)
+address.json
+
 # MacOS
 .DS_Store
 
