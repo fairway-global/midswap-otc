@@ -79,8 +79,8 @@ async function main() {
   // Dynamic import for Lucid (avoids libsodium ESM issues at top level)
   const { Lucid, Blockfrost, getAddressDetails } = await import('@lucid-evolution/lucid');
 
-  const provider = new Blockfrost('https://cardano-preview.blockfrost.io/api/v0', blockfrostApiKey);
-  const lucid = await Lucid(provider, 'Preview');
+  const provider = new Blockfrost('https://cardano-preprod.blockfrost.io/api/v0', blockfrostApiKey);
+  const lucid = await Lucid(provider, 'Preprod');
 
   const result: Record<string, unknown> = {};
 

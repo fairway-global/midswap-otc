@@ -42,10 +42,10 @@ async function main() {
   const addresses = JSON.parse(fs.readFileSync(addressPath, 'utf-8'));
   const { Lucid, Blockfrost } = await import('@lucid-evolution/lucid');
 
-  const provider = new Blockfrost('https://cardano-preview.blockfrost.io/api/v0', blockfrostApiKey);
-  const lucid = await Lucid(provider, 'Preview');
+  const provider = new Blockfrost('https://cardano-preprod.blockfrost.io/api/v0', blockfrostApiKey);
+  const lucid = await Lucid(provider, 'Preprod');
 
-  console.log('=== Cardano Preview Balances ===\n');
+  console.log('=== Cardano Preprod Balances ===\n');
 
   for (const [name, wallets] of Object.entries(addresses) as [string, any][]) {
     const { mnemonic, address } = wallets.cardano;

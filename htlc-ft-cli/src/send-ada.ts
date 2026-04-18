@@ -36,8 +36,8 @@ async function main() {
   const addresses = JSON.parse(fs.readFileSync(path.resolve(scriptDir, '..', 'address.json'), 'utf-8'));
   const { Lucid, Blockfrost } = await import('@lucid-evolution/lucid');
 
-  const provider = new Blockfrost('https://cardano-preview.blockfrost.io/api/v0', blockfrostApiKey);
-  const lucid = await Lucid(provider, 'Preview');
+  const provider = new Blockfrost('https://cardano-preprod.blockfrost.io/api/v0', blockfrostApiKey);
+  const lucid = await Lucid(provider, 'Preprod');
 
   const aliceAddr = addresses.alice.cardano.address;
   const amount = 300_000_000n; // 300 ADA

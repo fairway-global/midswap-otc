@@ -198,7 +198,7 @@ export class CardanoHTLC {
       .attach.SpendingValidator(this.validator)
       .addSigner(walletAddr)
       .validTo(Number(datum.deadline) - 60_000) // 1 min before deadline
-      .complete();
+      .complete({ localUPLCEval: false });
 
     const signed = await tx.sign.withWallet().complete();
     const txHash = await signed.submit();
@@ -231,7 +231,7 @@ export class CardanoHTLC {
       .attach.SpendingValidator(this.validator)
       .addSigner(walletAddr)
       .validFrom(Number(datum.deadline) + 1)
-      .complete();
+      .complete({ localUPLCEval: false });
 
     const signed = await tx.sign.withWallet().complete();
     const txHash = await signed.submit();

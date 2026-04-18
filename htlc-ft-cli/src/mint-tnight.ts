@@ -25,7 +25,7 @@ import { createKeystore } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
 const scriptDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
 const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
-const AMOUNT_PER_WALLET = 1_000_000_000n;
+const AMOUNT_PER_WALLET = 1_000_000_000_000n; // 1T tNight — needed for 500Q+ dust (additionalFeeOverhead on local dev)
 
 const env: EnvironmentConfiguration = {
   walletNetworkId: 'undeployed',

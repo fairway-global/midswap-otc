@@ -68,9 +68,9 @@ export class LocalDevConfig implements Config {
   requestFaucetTokens = false;
   generateDust = false;
   cardano: CardanoConfig = {
-    blockfrostUrl: 'https://cardano-preview.blockfrost.io/api/v0',
+    blockfrostUrl: 'https://cardano-preprod.blockfrost.io/api/v0',
     blockfrostApiKey: process.env.BLOCKFROST_API_KEY ?? '',
-    cardanoNetwork: 'Preview',
+    cardanoNetwork: 'Preprod',
     blueprintPath: path.resolve(currentDir, '..', '..', 'cardano', 'plutus.json'),
   };
 }
