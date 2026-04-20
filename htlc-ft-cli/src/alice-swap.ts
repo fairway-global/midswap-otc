@@ -102,7 +102,13 @@ async function main() {
   loadEnv();
   setNetworkId('undeployed');
 
-  const rli = readline.createInterface({ input: process.stdin, output: process.stdout });
+  // Non-interactive mode: `--yes` flag or ALICE_ACCEPT_ALL=1 env var uses defaults
+  // for ADA/USDC amount + deadline, and aborts on warnings (safe default).
+  // Needed for two-terminal tests where stdin isn't a TTY.
+  const autoAccept = process.argv.includes('--yes') || process.env.ALICE_ACCEPT_ALL === '1';
+  const rli = autoAccept
+    ? null
+    : readline.createInterface({ input: process.stdin, output: process.stdout });
 
   const addresses = JSON.parse(fs.readFileSync(path.resolve(scriptDir, '..', 'address.json'), 'utf-8'));
   const swapStatePath = path.resolve(scriptDir, '..', 'swap-state.json');
@@ -126,11 +132,21 @@ async function main() {
   console.log(`USDC Contract: ${swapState.usdcContractAddress}`);
   console.log(`USDC Color:    ${swapState.usdcColor}\n`);
 
-  const adaAmountStr = (await rli.question('ADA amount to swap [10]: ')) || '10';
+  let adaAmountStr: string;
+  let usdcAmount: bigint;
+  let deadlineMinStr: string;
+  if (autoAccept) {
+    adaAmountStr = process.env.ALICE_ADA ?? '10';
+    usdcAmount = BigInt(process.env.ALICE_USDC ?? adaAmountStr);
+    deadlineMinStr = process.env.ALICE_DEADLINE_MIN ?? '120';
+    console.log(`Auto-accept: ada=${adaAmountStr}, usdc=${usdcAmount}, deadline=${deadlineMinStr}min`);
+  } else {
+    adaAmountStr = (await rli!.question('ADA amount to swap [10]: ')) || '10';
+    usdcAmount = BigInt((await rli!.question(`USDC amount to receive [${adaAmountStr}]: `)) || adaAmountStr);
+    deadlineMinStr = (await rli!.question('Cardano deadline in minutes [120]: ')) || '120';
+  }
   const adaAmount = BigInt(adaAmountStr);
   const lovelaceAmount = adaAmount * 1_000_000n;
-  const usdcAmount = BigInt((await rli.question(`USDC amount to receive [${adaAmountStr}]: `)) || adaAmountStr);
-  const deadlineMinStr = (await rli.question('Cardano deadline in minutes [120]: ')) || '120';
   const deadlineMin = parseInt(deadlineMinStr);
 
   const logDir = path.resolve(scriptDir, '..', 'logs', 'alice-swap', `${new Date().toISOString()}.log`);
@@ -203,7 +219,11 @@ async function main() {
   // Verify it's the expected token color
   if (bytesToHex(deposit.color) !== swapState.usdcColor) {
     console.error(`WARNING: Deposit color ${bytesToHex(deposit.color)} differs from expected ${swapState.usdcColor}.`);
-    const proceed = await rli.question('Continue anyway? [y/N]: ');
+    if (autoAccept) {
+      console.log('Auto-accept: aborting on color mismatch (safe default). ADA reclaimable after deadline.');
+      process.exit(0);
+    }
+    const proceed = await rli!.question('Continue anyway? [y/N]: ');
     if (proceed.toLowerCase() !== 'y') {
       console.log('Aborting. ADA will be reclaimable after deadline.');
       process.exit(0);
@@ -212,7 +232,11 @@ async function main() {
 
   if (deposit.amount < usdcAmount) {
     console.error(`WARNING: Bob deposited ${deposit.amount} USDC but expected ${usdcAmount}.`);
-    const proceed = await rli.question('Continue anyway? [y/N]: ');
+    if (autoAccept) {
+      console.log('Auto-accept: aborting on short deposit (safe default). ADA reclaimable after deadline.');
+      process.exit(0);
+    }
+    const proceed = await rli!.question('Continue anyway? [y/N]: ');
     if (proceed.toLowerCase() !== 'y') {
       console.log('Aborting. ADA will be reclaimable after deadline.');
       process.exit(0);
@@ -235,7 +259,7 @@ async function main() {
   console.log(`║  Hash:     ${hashHex.slice(0, 32)}...`);
   console.log('╚══════════════════════════════════════════════════════════╝');
 
-  rli.close();
+  rli?.close();
   await walletProvider.stop();
   process.exit(0);
 }

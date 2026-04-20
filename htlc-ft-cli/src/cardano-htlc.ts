@@ -225,12 +225,16 @@ export class CardanoHTLC {
 
     const redeemer = reclaimRedeemer();
 
+    // Cardano slots are 1s. validFrom(ms) resolves to floor(ms/1000); the
+    // validator receives the slot's POSIX start as lower_bound and requires
+    // `lower_bound > deadline`. Adding +1ms can land in the deadline's slot,
+    // whose start is <= deadline. Offset by a full slot to force the next one.
     const tx = await this.lucid
       .newTx()
       .collectFrom([utxo], redeemer)
       .attach.SpendingValidator(this.validator)
       .addSigner(walletAddr)
-      .validFrom(Number(datum.deadline) + 1)
+      .validFrom(Number(datum.deadline) + 1000)
       .complete({ localUPLCEval: false });
 
     const signed = await tx.sign.withWallet().complete();

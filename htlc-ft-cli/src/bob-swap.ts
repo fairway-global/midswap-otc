@@ -118,7 +118,13 @@ async function main() {
   loadEnv();
   setNetworkId('undeployed');
 
-  const rli = readline.createInterface({ input: process.stdin, output: process.stdout });
+  // Non-interactive mode: `--yes` flag or BOB_ACCEPT_ALL=1 env var auto-accepts the
+  // swap and uses the default USDC amount (floor of ADA locked). Needed for two-
+  // terminal tests driven from tmux/CI where stdin isn't a TTY.
+  const autoAccept = process.argv.includes('--yes') || process.env.BOB_ACCEPT_ALL === '1';
+  const rli = autoAccept
+    ? null
+    : readline.createInterface({ input: process.stdin, output: process.stdout });
 
   const addresses = JSON.parse(fs.readFileSync(path.resolve(scriptDir, '..', 'address.json'), 'utf-8'));
   const swapStatePath = path.resolve(scriptDir, '..', 'swap-state.json');
@@ -190,15 +196,22 @@ async function main() {
 
   console.log(`\n  Alice locked ${adaLocked} ADA for you.`);
   console.log(`  Deadline: ${deadlineDate.toISOString()}`);
-  const accept = (await rli.question('\n  Accept this swap? [Y/n]: ')) || 'y';
-  if (accept.toLowerCase() !== 'y') {
-    console.log('Swap rejected. Exiting.');
-    process.exit(0);
-  }
 
-  const usdcAmountStr =
-    (await rli.question(`  USDC amount to deposit [${Math.floor(adaLocked)}]: `)) ||
-    String(Math.floor(adaLocked));
+  const defaultUsdc = String(Math.floor(adaLocked));
+  let usdcAmountStr: string;
+  if (autoAccept) {
+    console.log('  Auto-accepting swap (--yes).');
+    console.log(`  USDC amount to deposit: ${defaultUsdc} (default)`);
+    usdcAmountStr = defaultUsdc;
+  } else {
+    const accept = (await rli!.question('\n  Accept this swap? [Y/n]: ')) || 'y';
+    if (accept.toLowerCase() !== 'y') {
+      console.log('Swap rejected. Exiting.');
+      process.exit(0);
+    }
+    usdcAmountStr =
+      (await rli!.question(`  USDC amount to deposit [${defaultUsdc}]: `)) || defaultUsdc;
+  }
   const usdcAmount = BigInt(usdcAmountStr);
 
   // ── Deposit USDC on Midnight HTLC ──
@@ -206,9 +219,49 @@ async function main() {
 
   const hashLock = hexToBytes(htlcInfo.hashHex);
 
-  // Bob's Midnight deadline MUST be shorter than Alice's Cardano deadline.
+  // Bob's Midnight deadline MUST be shorter than Alice's Cardano deadline by a
+  // safety margin large enough to cover: (a) Alice claiming USDC on Midnight
+  // before Bob's deadline, (b) the preimage reveal appearing in the Midnight
+  // indexer, (c) Bob observing it, (d) Bob building + submitting a Cardano
+  // claim tx, and (e) Cardano confirming it — all before the Cardano deadline.
+  const SAFETY_BUFFER_SECS = 600; // 10 min; Preprod slot finality + build + submit.
+  const MIN_CARDANO_DEADLINE_WINDOW_SECS = 1800; // 30 min; refuse if Alice lowballed.
   const bobDeadlineMin = 60;
-  const bobDeadlineUnix = BigInt(Math.floor(Date.now() / 1000) + bobDeadlineMin * 60);
+
+  const nowSecs = Math.floor(Date.now() / 1000);
+  const cardanoDeadlineSecs = Number(htlcInfo.deadlineMs) / 1000;
+  const cardanoRemaining = cardanoDeadlineSecs - nowSecs;
+
+  if (cardanoRemaining < MIN_CARDANO_DEADLINE_WINDOW_SECS) {
+    console.error(
+      `\n✗ Alice's Cardano deadline is only ${Math.round(cardanoRemaining / 60)} min away — ` +
+        `at least ${MIN_CARDANO_DEADLINE_WINDOW_SECS / 60} min is required to safely execute the swap.`,
+    );
+    console.error('  Aborting: unsafe to deposit, counterparty could race the reclaim.');
+    process.exit(1);
+  }
+
+  const maxBobDeadlineSecs = cardanoDeadlineSecs - SAFETY_BUFFER_SECS;
+  const desiredBobDeadlineSecs = nowSecs + bobDeadlineMin * 60;
+  const bobDeadlineSecs = Math.min(desiredBobDeadlineSecs, maxBobDeadlineSecs);
+
+  if (bobDeadlineSecs <= nowSecs + 120) {
+    console.error(
+      `\n✗ Cannot pick a safe Midnight deadline: ` +
+        `cardano=${new Date(cardanoDeadlineSecs * 1000).toISOString()}, ` +
+        `safety buffer=${SAFETY_BUFFER_SECS}s leaves < 2 min for Bob to operate.`,
+    );
+    process.exit(1);
+  }
+
+  if (bobDeadlineSecs < desiredBobDeadlineSecs) {
+    console.log(
+      `  Note: truncating Midnight deadline from ${bobDeadlineMin}min to ` +
+        `${Math.round((bobDeadlineSecs - nowSecs) / 60)}min to stay ${SAFETY_BUFFER_SECS / 60}min inside Cardano deadline.`,
+    );
+  }
+
+  const bobDeadlineUnix = BigInt(bobDeadlineSecs);
 
   // Auth = Alice's ZswapCoinPublicKey bytes (to gate withdrawWithPreimage).
   const aliceAuthBytes = hexToBytes(addresses.alice.midnight.coinPublicKey);
@@ -222,7 +275,8 @@ async function main() {
   console.log(`Depositing ${usdcAmount} USDC (native unshielded)...`);
   console.log(`  Hash:     ${htlcInfo.hashHex.slice(0, 32)}...`);
   console.log(`  Color:    ${swapState.usdcColor.slice(0, 20)}...`);
-  console.log(`  Deadline: ${new Date(Number(bobDeadlineUnix) * 1000).toISOString()} (${bobDeadlineMin}min)`);
+  const actualBobMin = Math.round((bobDeadlineSecs - nowSecs) / 60);
+  console.log(`  Deadline: ${new Date(Number(bobDeadlineUnix) * 1000).toISOString()} (${actualBobMin}min)`);
   console.log(`  Receiver: Alice`);
 
   await contract.callTx.deposit(
@@ -272,7 +326,7 @@ async function main() {
   console.log(`║  Preimage: ${preimageHex.slice(0, 32)}... (from on-chain)`);
   console.log('╚══════════════════════════════════════════════════════════╝');
 
-  rli.close();
+  rli?.close();
   await walletProvider.stop();
   process.exit(0);
 }
