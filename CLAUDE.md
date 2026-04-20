@@ -2,130 +2,139 @@
 
 ## What This Project Is
 
-A fully working cross-chain atomic swap between **Midnight** (privacy-focused L1) and **Cardano** (Preprod testnet). Alice trades ADA for USDC tokens, Bob trades USDC for ADA. Neither party can cheat — the swap is trustless via hash-time lock contracts (HTLCs) on both chains.
+A trustless cross-chain atomic swap between **Midnight** (privacy-focused L1) and **Cardano** (Preprod testnet). Alice trades ADA for native USDC; Bob trades native USDC for ADA. Neither party can cheat — escrow is hash-time-locked on both chains, and if either side times out the funds reclaim to the original sender.
 
-**The swap has been successfully executed end-to-end** on Cardano Preprod + Midnight local dev using `execute-swap.ts`.
+The Midnight side has been **split into two contracts**:
+
+- `usdc.compact` — pure USD Coin minter built on Midnight's native unshielded-token primitives (`mintUnshieldedToken` / `receiveUnshielded` / `sendUnshielded`). No internal balance map; coins live in user wallets at the Zswap layer, analogous to ADA in Cardano UTXOs.
+- `htlc.compact` — generic, color-parametric hash-time-locked escrow that holds native unshielded coins of any color. Pulls coins in on deposit, releases to receiver on `withdrawWithPreimage` or back to sender on `reclaimAfterExpiry`.
+
+This decoupling mirrors the Cardano design: HTLC is a pure escrow that holds a native asset, never an ERC20-ish ledger embedded in the same contract.
 
 ## Project Layout
 
 ```
 example-bboard/
-├── contract/                    # Midnight smart contracts (Compact language)
+├── contract/                        # Midnight smart contracts (Compact language)
 │   ├── src/
-│   │   ├── htlc-ft.compact           # HTLC + FungibleToken combined contract (THE main contract)
-│   │   ├── usdc.compact              # Standalone USDC token (NEW, compiled, not yet integrated)
-│   │   ├── htlc-ft-contract.ts       # TypeScript wrapper for htlc-ft
-│   │   ├── usdc-contract.ts          # TypeScript wrapper for usdc (NEW)
-│   │   ├── managed/htlc-ft/          # Compiled HTLC-FT artifacts (prover/verifier keys, ZKIR)
-│   │   ├── managed/usdc/             # Compiled USDC artifacts
-│   │   └── vendor/openzeppelin/      # OpenZeppelin FungibleToken standard
+│   │   ├── htlc.compact             # Generic native-token HTLC escrow (THE main contract)
+│   │   ├── usdc.compact             # USDC native unshielded-token minter
+│   │   ├── htlc-contract.ts         # TypeScript wrapper for htlc
+│   │   ├── usdc-contract.ts         # TypeScript wrapper for usdc
+│   │   ├── managed/htlc/            # Compiled HTLC artifacts (prover/verifier keys, ZKIR)
+│   │   ├── managed/usdc/            # Compiled USDC artifacts
+│   │   ├── test/
+│   │   │   └── sha256-equivalence.test.ts  # Proves Compact persistentHash<Bytes<32>> == Node createHash('sha256')
+│   │   └── vendor/openzeppelin/     # Retained for reference; no longer imported by HTLC
 │   └── package.json
 │
-├── htlc-ft-cli/                 # CLI tools for running swaps
+├── htlc-ft-cli/                     # CLI tools for running swaps
 │   ├── src/
-│   │   ├── execute-swap.ts           # Automated end-to-end swap (WORKS, ran successfully)
-│   │   ├── alice-swap.ts             # Alice's standalone flow (NEW, needs alignment)
-│   │   ├── bob-swap.ts               # Bob's standalone flow (NEW, needs alignment)
-│   │   ├── setup-contract.ts         # Deploy both contracts (NEW, needs alignment)
-│   │   ├── mint-usdc.ts              # Mint USDC tokens (NEW, needs alignment)
-│   │   ├── midnight-watcher.ts       # Watch Midnight indexer for deposits/preimage reveals (NEW)
-│   │   ├── cardano-watcher.ts        # Watch Cardano via Blockfrost for HTLC locks (NEW)
-│   │   ├── cardano-htlc.ts           # Cardano HTLC off-chain module (Lucid Evolution)
-│   │   ├── index.ts                  # Interactive CLI menu (original, modified)
-│   │   ├── config.ts                 # Environment config (local dev + preprod)
+│   │   ├── execute-swap.ts          # Automated end-to-end swap — the regression harness
+│   │   ├── alice-swap.ts            # Alice's two-terminal flow (initiator)
+│   │   ├── bob-swap.ts              # Bob's two-terminal flow (responder)
+│   │   ├── setup-contract.ts        # Deploys both contracts, mints initial USDC, writes swap-state.json
+│   │   ├── mint-usdc.ts             # Mint more native USDC after setup
+│   │   ├── smoke-native.ts          # Deposit + reclaim smoke test on Midnight only (no Cardano)
+│   │   ├── smoke-cardano-reclaim.ts # Lock + reclaim on Cardano HTLC (post-deadline)
+│   │   ├── midnight-watcher.ts      # Polls indexer for deposits + revealedPreimages
+│   │   ├── cardano-watcher.ts       # Polls Blockfrost for HTLC UTxOs; filters by receiver PKH + hash
+│   │   ├── cardano-htlc.ts          # Cardano off-chain module (Lucid Evolution)
+│   │   ├── index.ts                 # Interactive CLI menu (original bboard, retained)
+│   │   ├── config.ts
 │   │   ├── midnight-wallet-provider.ts
 │   │   ├── wallet-utils.ts
-│   │   ├── generate-dust.ts          # Dust generation for Midnight tx fees
-│   │   ├── mint-tnight.ts            # Mint tNight to wallets
-│   │   ├── generate-keys.ts          # Generate Alice/Bob/Charlie key pairs
-│   │   ├── check-balance.ts          # Check Cardano ADA balance
-│   │   ├── check-midnight-balance.ts # Check Midnight balance
-│   │   └── send-ada.ts               # Send ADA between wallets
-│   ├── address.json                  # Alice/Bob/Charlie addresses (both chains)
-│   └── .env                          # BLOCKFROST_API_KEY
+│   │   ├── generate-dust.ts
+│   │   ├── mint-tnight.ts
+│   │   ├── generate-keys.ts
+│   │   ├── check-balance.ts
+│   │   ├── check-midnight-balance.ts
+│   │   └── send-ada.ts
+│   ├── address.json                 # Alice/Bob/Charlie addresses (both chains)
+│   ├── swap-state.json              # Written by setup-contract: contract addresses + usdcColor
+│   ├── pending-swap.json            # Written by alice-swap: hash for bob-swap's watcher filter
+│   └── .env                         # BLOCKFROST_API_KEY
 │
-└── cardano/                     # Cardano validators (Aiken language)
+└── cardano/                         # Cardano validators (Aiken language)
     ├── validators/
-    │   ├── htlc.ak                   # HTLC spending validator
-    │   └── swap_token.ak             # One-shot minting policy
-    ├── lib/htlc/                     # Types and validation logic
-    └── plutus.json                   # Compiled Plutus blueprint
+    │   ├── htlc.ak                  # HTLC spending validator
+    │   └── swap_token.ak            # One-shot minting policy
+    ├── lib/htlc/                    # Types and validation logic
+    └── plutus.json                  # Compiled Plutus blueprint
 ```
 
 ## How the Atomic Swap Works
 
 ```
-Alice has ADA on Cardano, wants USDC on Midnight.
-Bob has USDC on Midnight, wants ADA on Cardano.
+Alice has ADA on Cardano, wants native USDC on Midnight.
+Bob has native USDC on Midnight, wants ADA on Cardano.
 
-1. Alice generates a random 32-byte PREIMAGE and computes HASH = SHA256(PREIMAGE)
-2. Alice locks ADA on Cardano HTLC (keyed by HASH, deadline = 2 hours, receiver = Bob)
-3. Bob watches Cardano, sees Alice's lock, discovers the HASH
-4. Bob deposits USDC on Midnight HTLC (same HASH, deadline = 1 hour, receiver = Alice)
-   - Bob's deadline MUST be shorter than Alice's (prevents race conditions)
-5. Alice claims USDC on Midnight by calling withdrawWithPreimage(PREIMAGE)
-   - This reveals the PREIMAGE on-chain
-6. Bob watches Midnight, reads the revealed PREIMAGE from contract state
-7. Bob claims ADA on Cardano using the same PREIMAGE
-   - Cardano validates: SHA256(PREIMAGE) == HASH in datum
+1. Alice generates a random 32-byte PREIMAGE and computes HASH = SHA256(PREIMAGE).
+2. Alice locks ADA on Cardano HTLC (keyed by HASH, ~2h deadline, receiver = Bob).
+   Alice also writes HASH to pending-swap.json so Bob can filter.
+3. Bob watches Cardano, matches Alice's lock by HASH, deposits native USDC
+   on Midnight HTLC (same HASH, ≥10min shorter deadline than Alice's, receiver = Alice).
+4. Alice claims USDC on Midnight by calling withdrawWithPreimage(PREIMAGE).
+   This reveals PREIMAGE in the HTLC's revealedPreimages map.
+5. Bob watches Midnight's revealedPreimages map and reads PREIMAGE.
+6. Bob claims ADA on Cardano with PREIMAGE.
+   Cardano validator checks sha256(PREIMAGE) == datum.preimageHash.
 
-Result: Alice got USDC, Bob got ADA. Neither could cheat.
-If either side times out, funds are reclaimable by the original sender.
+If either side times out, the original sender reclaims:
+  - Alice's ADA on Cardano after her deadline (Reclaim redeemer).
+  - Bob's USDC on Midnight after his deadline (reclaimAfterExpiry circuit).
 ```
 
-## The HTLC-FT Contract (Midnight Side)
+## The HTLC Contract (Midnight, Generic Escrow)
 
-**File:** `contract/src/htlc-ft.compact`
+**File:** `contract/src/htlc.compact`
 
-This is the main contract. It combines OpenZeppelin's FungibleToken (ERC20-like) with HTLC swap logic. Midnight has **no cross-contract calls**, so the token and swap logic MUST live in the same contract.
+Pure color-parametric escrow over native unshielded tokens. No token ledger of its own — it pulls/pushes `Uint<128>` coins of an arbitrary `color: Bytes<32>` via the Zswap primitives.
 
-**Constructor:** `constructor(tokenName, tokenSymbol, tokenDecimals)` — initializes the FungibleToken.
+**Circuits:**
+- `deposit(color, amount, hash, expiryTime, receiverAuth, receiverPayout, senderPayout)` — pulls `amount` coins of `color` via `receiveUnshielded`, records parties + deadline + color keyed by `hash`.
+- `withdrawWithPreimage(preimage)` — receiver-authenticated claim; derives `hash = persistentHash<Bytes<32>>(preimage)`, sends coins to `receiverPayout`, writes `revealedPreimages[hash] = preimage`, marks amount=0.
+- `reclaimAfterExpiry(hash)` — sender-authenticated refund after `blockTimeGt(expiry)`.
 
-**Token circuits** (delegated to FT module):
-- `myAddr()` — returns caller's 32-byte public key
-- `totalSupply()` — total minted supply
-- `balanceOf(account)` — balance of an address (uses `Either<ZswapCoinPublicKey, ContractAddress>`)
-- `transfer(to, value)` — transfer tokens between users
-- `approve(spender, value)` — approve spending allowance
-- `mint(account, value)` — mint new tokens
+**Auth vs. payout separation.** Each entry stores two things per party: a `Bytes<32>` auth key (`ZswapCoinPublicKey` bytes, checked against `ownPublicKey().bytes`) and a payout destination (`Either<ContractAddress, UserAddress>`, consumed by `sendUnshielded`). Compact currently has no primitive to derive one from the other inside a circuit, so both must be passed explicitly.
 
-**HTLC circuits:**
-- `depositWithHashTimeLock(amount, hash, expiryTime, receiver)` — escrow tokens under hash lock
-- `withdrawWithPreimage(preimage)` — claim by revealing preimage (before deadline)
-- `reclaimAfterExpiry(hash)` — refund after deadline
+**Ledger state (all `export ledger`, indexer-queryable):**
+- `htlcAmounts: Map<Bytes<32>, Uint<128>>` — escrowed amount per hash; `0` is the completed-swap sentinel.
+- `htlcExpiries: Map<Bytes<32>, Uint<64>>`
+- `htlcColors: Map<Bytes<32>, Bytes<32>>`
+- `htlcSenderAuth`, `htlcReceiverAuth: Map<Bytes<32>, Bytes<32>>`
+- `htlcSenderPayout`, `htlcReceiverPayout: Map<Bytes<32>, Either<ContractAddress, UserAddress>>`
+- `revealedPreimages: Map<Bytes<32>, Bytes<32>>` — populated by `withdrawWithPreimage`, read by Bob's watcher.
 
-**Ledger state (exported, queryable via indexer):**
-- `htlcAmounts: Map<Bytes<32>, Uint<128>>` — escrowed amount per hash
-- `htlcExpiries: Map<Bytes<32>, Uint<64>>` — expiry timestamp per hash
-- `htlcSenders: Map<Bytes<32>, Bytes<32>>` — sender per hash
-- `htlcReceivers: Map<Bytes<32>, Bytes<32>>` — receiver per hash
+Maps have no `delete`, so sentinel values are used.
 
-**How escrow works internally:**
-- `depositWithHashTimeLock`: calls `FT__unsafeUncheckedTransfer(caller, contractSelf, amount)` to move tokens from user's balance to contract's balance
-- `withdrawWithPreimage`: calls `FT__unsafeUncheckedTransfer(contractSelf, receiver, amount)` to release tokens
-- `reclaimAfterExpiry`: same as withdraw but back to sender
-- Completed swaps use `amount = 0` as sentinel (Compact Maps have no delete)
-
-## The USDC Contract (Standalone Token)
+## The USDC Contract (Native Token Minter)
 
 **File:** `contract/src/usdc.compact`
 
-A separate, standalone USD Coin token contract. Pure ERC20 — no HTLC logic. Created for future architecture where tokens and swaps are managed independently.
+Minter for native Zswap unshielded coins with a deterministic color. Constructor takes `(tokenName, tokenSymbol, tokenDecimals, domainSep)`. The domainSep + contract address fully determine the color via `mintUnshieldedToken`.
 
-**Status:** Compiled (managed/usdc/ exists), TypeScript wrapper created (usdc-contract.ts), but **not yet integrated into the CLI workflows**.
+**Circuits:**
+- `mint(recipient: Either<ContractAddress, UserAddress>, amount: Uint<64>)` — mints `amount` native coins of this token's color to `recipient`. First call captures `_color`.
+- `name() / symbol() / decimals() / color()` — impure metadata reads.
+
+`_color` is `export ledger Bytes<32>` (not sealed) so it can be set on first mint. There is no on-chain balance map — holders' balances live as native unshielded UTXOs in their wallets.
 
 ## The Cardano HTLC (Aiken Validator)
 
-**File:** `cardano/validators/htlc.ak`
-**Compiled:** `cardano/plutus.json`
+**File:** `cardano/validators/htlc.ak` · **Compiled:** `cardano/plutus.json`
 
-PlutusV3 spending validator with:
+PlutusV3 spending validator:
 - **Datum:** `{ preimageHash, sender (PKH), receiver (PKH), deadline (POSIX ms) }`
 - **Redeemer:** `Withdraw { preimage }` or `Reclaim`
-- **Withdraw validation:** `sha256(preimage) == datum.preimageHash`, current time < deadline, signer is receiver
-- **Reclaim validation:** current time > deadline, signer is sender
+- **Withdraw:** `sha256(preimage) == datum.preimageHash`, `upper_bound < deadline`, signer is receiver
+- **Reclaim:** `lower_bound > deadline` (strict), signer is sender
 
-The off-chain code (`htlc-ft-cli/src/cardano-htlc.ts`) uses Lucid Evolution to build/submit transactions.
+Off-chain uses Lucid Evolution (`cardano-htlc.ts`).
+
+### validFrom slot-alignment pitfall (reclaim path)
+
+On Preprod (1-slot = 1s), `validFrom(posixMs)` floors to the slot's POSIX start = `slotFromUnixTime(posixMs) * 1000ms`. If `posixMs == deadline`, the tx's `lower_bound` becomes exactly `deadline`, and the Aiken check `lower_bound > deadline` is strictly greater-than, so the reclaim fails on-chain. The fix is to offset by one whole slot past the deadline (`+1000ms`). This lives inside `CardanoHTLC.reclaim()`.
 
 ## Build & Compile Process
 
@@ -134,44 +143,43 @@ The off-chain code (`htlc-ft-cli/src/cardano-htlc.ts`) uses Lucid Evolution to b
 ```bash
 cd contract
 
-# Compile Compact -> managed artifacts (ZKIR, prover/verifier keys)
-compact compile src/htlc-ft.compact ./src/managed/htlc-ft
-compact compile src/usdc.compact ./src/managed/usdc
+# Compile .compact -> managed artifacts (ZKIR + prover/verifier keys)
+npm run compact:htlc     # -> src/managed/htlc/
+npm run compact:usdc     # -> src/managed/usdc/
 
-# Build TypeScript (generates dist/ with .js, .d.ts, copies managed/)
-npm run build:htlc
-# Which runs: rm -rf dist && tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed
+# TypeScript build + copy managed/ + copy .compact sources into dist/
+npm run build:all
 ```
 
 The `compact` binary is at `/Users/kaleab/.local/bin/compact`. Do NOT use `npx compact` — it won't find it.
 
-**IMPORTANT:** After any `.compact` file change, you must:
-1. `compact compile` the contract
-2. Run `npm run build:htlc` (or manually: `tsc --project tsconfig.build.json && cp -Rf ./src/managed ./dist/managed`)
+**IMPORTANT:** After ANY `.compact` file change, compile + `build:all`, otherwise CLI scripts will use stale artifacts and silently break.
 
 ### NPM scripts
 
 **Contract (`contract/package.json`):**
 ```
-compact:htlc    # compact compile src/htlc-ft.compact ./src/managed/htlc-ft
+compact:htlc    # compact compile src/htlc.compact ./src/managed/htlc
 compact:usdc    # compact compile src/usdc.compact ./src/managed/usdc
-build:htlc      # Full TS build + copy managed artifacts
+build:all       # rm -rf dist && tsc && cp managed + .compact into dist
+test            # vitest — includes sha256-equivalence.test.ts
 typecheck       # tsc --noEmit
+lint            # eslint src
 ```
 
 **CLI (`htlc-ft-cli/package.json`):**
 ```
-setup           # Deploy contracts + mint initial supply
-mint-usdc       # Mint USDC to a participant
-swap:alice      # Run Alice's swap flow
-swap:bob        # Run Bob's swap flow
+setup           # Deploy both contracts + mint initial USDC to participants
+mint-usdc       # Mint more USDC to a participant
+swap:alice      # Run Alice's initiator flow
+swap:bob        # Run Bob's responder flow
 mint-tnight     # Mint tNight to wallets
-check-balance   # Check Cardano ADA balance
-check-midnight  # Check Midnight balance
+check-balance   # Cardano ADA balance
+check-midnight  # Midnight balance
 typecheck       # tsc --noEmit
 ```
 
-All CLI scripts run via: `node --experimental-specifier-resolution=node --loader ts-node/esm src/<script>.ts`
+All CLI scripts run via: `node --experimental-specifier-resolution=node --loader ts-node/esm src/<script>.ts`.
 
 ## Network Configuration
 
@@ -184,150 +192,109 @@ All CLI scripts run via: `node --experimental-specifier-resolution=node --loader
 - Blockfrost: `https://cardano-preprod.blockfrost.io/api/v0`
 - API key in `.env`: `BLOCKFROST_API_KEY=preprodmt96ybDEKiQr93kJbYa8oaziBoQL1sYg`
 
-**Previously we used Cardano Preview but it had `PPViewHashesDontMatch` errors** due to cost model mismatch in Blockfrost. Switching to Preprod fixed it.
+Preview was dropped earlier due to `PPViewHashesDontMatch` errors from Blockfrost cost-model mismatch; Preprod does not have this problem.
 
-## Wallet Funding Requirements
+## Wallet Funding
 
-- **Midnight:** Each wallet needs ~1T tNight (1,000,000,000,000) for dust generation. The `additionalFeeOverhead` in local dev is 500Q (500,000,000,000,000,000n). Use `mint-tnight.ts` to fund.
-- **Cardano:** Fund via Cardano Preprod faucet. Alice needs enough ADA to lock in HTLC. Bob needs ADA for transaction fees.
+- **Midnight:** ~1T tNight per participant for dust; local dev `additionalFeeOverhead` is 500Q. Use `mint-tnight.ts`.
+- **Cardano Preprod:** fund via faucet. Alice needs the ADA she wants to swap plus fees; Bob needs fees only.
 
 ## Key Technical Details & Gotchas
 
 ### Compact language
-- `Opaque<"string">` — values that come from the runtime (TypeScript side), opaque to Compact
-- `disclose(value)` — makes a value public (visible in the transaction)
-- `persistentHash<T>(value)` — SHA-256 hash, same as Cardano's on-chain SHA-256
-- `ownPublicKey()` — returns caller's `ZswapCoinPublicKey`
-- `kernel.self()` — returns the contract's own `ContractAddress`
-- `left<A,B>(a)` / `right<A,B>(b)` — construct `Either` type
-- `blockTimeLt(t)` / `blockTimeLte(t)` / `blockTimeGt(t)` — time comparisons
-- Arithmetic on `Uint<128>` widens the type — use `as Uint<128>` cast after add/subtract
-- Maps have no `delete()` — use sentinel values (e.g., amount = 0 for completed swaps)
-- `sealed ledger` fields — can only be set once (in constructor via `initialize`)
+- `Opaque<"string">`, `disclose(value)`, `persistentHash<T>(value)`.
+- `ownPublicKey()` — caller's `ZswapCoinPublicKey` (`.bytes` is `Bytes<32>`).
+- `receiveUnshielded(color, amount)` / `sendUnshielded(color, amount, recipient)` — native coin I/O.
+- `mintUnshieldedToken(domainSep, amount, recipient): Bytes<32>` — returns the derived color.
+- `blockTimeLt` / `blockTimeLte` / `blockTimeGt` — time comparisons over `Uint<64>` POSIX seconds or ms depending on context.
+- Map has no `delete`; use sentinel values (amount=0 = completed).
+- `sealed ledger` fields — write-once-in-constructor (`_color` is intentionally NOT sealed, since it's set on first `mint` call).
+
+### Native unshielded coin I/O
+`receiveUnshielded` in a circuit causes `midnight-js-contracts` to attach matching coin inputs of `color` from the caller's wallet. `sendUnshielded` creates an unshielded output to the specified recipient. Per-swap state in the ledger maps (amount, color, expiry, parties) is the source of truth for the contract's bookkeeping; the held coins are released against that state via `sendUnshielded`, and a completed swap is marked by `htlcAmounts[hash] = 0`.
 
 ### TypeScript wrapper pattern
 ```typescript
 import { CompiledContract } from "@midnight-ntwrk/compact-js";
-import * as CompiledHTLCFT from "./managed/htlc-ft/contract/index.js";
+import * as CompiledHTLC from "./managed/htlc/contract/index.js";
 
-export const CompiledHTLCFTContract = CompiledContract.make<HTLCFTContract>(
-  "HtlcFt",   // Contract label — derived from filename (htlc-ft -> HtlcFt)
-  CompiledHTLCFT.Contract<EmptyPrivateState>,
+export const CompiledHTLCContract = CompiledContract.make<HTLCContract>(
+  "Htlc",                                        // label derived from filename
+  CompiledHTLC.Contract<EmptyPrivateState>,
 ).pipe(
-  // @ts-expect-error: Witnesses<EmptyPrivateState> = {} — no witnesses to provide
+  // @ts-expect-error: Witnesses<EmptyPrivateState> = {}
   CompiledContract.withWitnesses({}),
-  CompiledContract.withCompiledFileAssets("./managed/htlc-ft"),
+  CompiledContract.withCompiledFileAssets("./managed/htlc"),
 );
 ```
 
 ### Address encoding
-- `encodeCoinPublicKey(hexString)` — converts a hex coin public key to `Uint8Array` (takes a string, NOT an object)
-- `Either<ZswapCoinPublicKey, ContractAddress>` — used for addresses in FungibleToken operations:
-  ```typescript
-  // User address (left):
-  { is_left: true, left: { bytes: addrBytes }, right: { bytes: new Uint8Array(32) } }
-  // Contract address (right):
-  { is_left: false, left: { bytes: new Uint8Array(32) }, right: { bytes: contractBytes } }
+- `Either<ContractAddress, UserAddress>` is a tagged pair — fill the unused branch with zero bytes:
+  ```ts
+  // User payout:
+  { is_left: false, left: { bytes: new Uint8Array(32) }, right: { bytes: userAddrBytes } }
   ```
+- Auth key: pass `Bytes<32>` (coin public key bytes), checked against `ownPublicKey().bytes` inside the circuit.
 
 ### PublicDataProvider
-- **NOT a generic type** — use `PublicDataProvider`, never `PublicDataProvider<any>`
-- `queryContractState(contractAddress)` returns state that you decode with `ledger(state.data)`
+- **NOT a generic type** — use `PublicDataProvider`, never `PublicDataProvider<any>`.
+- `queryContractState(contractAddress)` → decode with `ledger(state.data)`.
 
 ### Midnight indexer
-- GraphQL at `http://127.0.0.1:8088/api/v3/graphql`
-- WebSocket at `ws://127.0.0.1:8088/api/v3/graphql/ws`
-- `contractStateObservable()` for real-time subscriptions
-- `queryContractState()` for polling
-- Docs: https://docs.midnight.network/relnotes/midnight-indexer
+- GraphQL at `http://127.0.0.1:8088/api/v3/graphql`, WS at `.../graphql/ws`.
+- `contractStateObservable()` for subscriptions, `queryContractState()` for polling.
 
-## What Was Successfully Done
+### Watcher pitfall: shared script address + concurrent HTLCs
+The Cardano script address is shared across ALL HTLCs (it's purely the compiled validator's script hash). `cardano-watcher.watchForCardanoLock` must filter by (a) receiver PKH, (b) freshness (`datum.deadline > now`), AND (c) specific `hashHex` from the coordinated swap. Without the hash filter, Bob can latch onto the wrong UTXO when concurrent or orphaned locks exist.
 
-1. **Built the complete HTLC-FT contract** with OpenZeppelin FungibleToken integration, concurrent swap support via Maps, and all escrow logic
-2. **Built the Cardano HTLC validator** in Aiken (PlutusV3) with withdraw/reclaim redeemer support
-3. **Built the Cardano off-chain module** using Lucid Evolution for lock/claim/reclaim/listHTLCs
-4. **Switched from Cardano Preview to Preprod** to fix PPViewHashesDontMatch errors
-5. **Funded wallets**: 1T tNight on Midnight, ADA on Cardano Preprod
-6. **Successfully executed the full cross-chain atomic swap** via `execute-swap.ts`:
-   - Bob deployed HTLC-FT contract, minted 100 SWAP tokens
-   - Alice locked 10 ADA on Cardano HTLC
-   - Bob deposited 10 SWAP on Midnight HTLC (same hash)
-   - Alice claimed SWAP on Midnight (revealed preimage)
-   - Bob claimed ADA on Cardano (used revealed preimage)
-   - Final balances verified, HTLC status: COMPLETED
-7. **Created standalone Alice/Bob swap scripts** (`alice-swap.ts`, `bob-swap.ts`) for separate-process execution
-8. **Created chain watcher modules** (`midnight-watcher.ts`, `cardano-watcher.ts`) for polling on-chain state
-9. **Created setup/management scripts** (`setup-contract.ts`, `mint-usdc.ts`)
-10. **Created standalone USDC token contract** (`usdc.compact`) — compiled but not yet integrated
+Coordination is via `pending-swap.json`: Alice writes the hash after locking; Bob reads it (or takes `--hash` CLI arg / `SWAP_HASH` env var). See `alice-swap.ts` and `bob-swap.ts`.
 
-## What Still Needs To Be Done
+### Deadline validation (bob-swap.ts)
+Before depositing on Midnight, Bob checks that Alice's Cardano deadline is at least `MIN_CARDANO_DEADLINE_WINDOW_SECS` (30min) away and picks a Midnight deadline `SAFETY_BUFFER_SECS` (10min) inside of it. Aborts if the margins cannot be satisfied — this protects Bob from a "lowballed deadline" race.
 
-### 1. Add `revealedPreimages` to HTLC-FT contract
-The current committed `htlc-ft.compact` does NOT store revealed preimages on-chain. `withdrawWithPreimage` marks the swap complete but doesn't save the preimage for Bob to observe. This needs to be added:
+### Non-interactive flags
+Both `alice-swap.ts` and `bob-swap.ts` accept `--yes` or respective `ALICE_ACCEPT_ALL=1` / `BOB_ACCEPT_ALL=1` env vars for unattended runs (two-terminal tests, CI). Alice additionally honours `ALICE_ADA`, `ALICE_USDC`, `ALICE_DEADLINE_MIN`.
 
-```compact
-// Add to ledger state:
-export ledger revealedPreimages: Map<Bytes<32>, Bytes<32>>;
+## Verification Tests
 
-// Add to withdrawWithPreimage, BEFORE marking complete:
-revealedPreimages.insert(hash, disclose(preimage));
-```
-
-Without this, Bob has no way to discover the preimage on-chain. The `midnight-watcher.ts` already has code to read `revealedPreimages` — it just needs the contract to actually store them.
-
-After adding this, recompile and rebuild:
-```bash
-cd contract
-compact compile src/htlc-ft.compact ./src/managed/htlc-ft
-npm run build:htlc
-```
-
-### 2. Align CLI scripts with contract state
-The new CLI scripts (`alice-swap.ts`, `bob-swap.ts`, `setup-contract.ts`, `mint-usdc.ts`) were written for a separated architecture that was reverted. They need to be reconciled:
-
-**Option A — Keep combined htlc-ft contract (current state):**
-- `setup-contract.ts` should deploy ONE contract (htlc-ft), not two
-- `swap-state.json` should use `contractAddress` (not `htlcContractAddress`/`usdcContractAddress`)
-- `alice-swap.ts` and `bob-swap.ts` should read `swapState.contractAddress`
-- `mint-usdc.ts` should use htlc-ft contract (which has `mint`)
-- The standalone USDC contract (`usdc.compact`) becomes a separate, independent deployment
-
-**Option B — Separate HTLC from token:**
-- Requires deciding how to handle escrow without cross-contract calls
-- The HTLC still needs FungibleToken internally for balance tracking
-- Could remove `transfer`, `approve` from HTLC (keep only swap ops + mint/balanceOf)
-- Or keep HTLC-FT as-is and USDC as an independent token contract
-
-### 3. Test the split Alice/Bob flows end-to-end
-The `alice-swap.ts` and `bob-swap.ts` have never been tested together. They should be run in separate terminals to verify:
-- Alice locks ADA, waits for Bob's deposit
-- Bob watches Cardano, deposits USDC, watches for preimage
-- Alice claims USDC (reveals preimage on Midnight)
-- Bob reads preimage from Midnight, claims ADA on Cardano
-
-### 4. Consider additional features (from earlier discussion)
-- CLI menu integration for the new scripts
-- Better error handling / retry logic in watchers
-- Deadline safety checks (Bob's deadline must be significantly shorter than Alice's)
+- `contract/src/test/sha256-equivalence.test.ts` — proves Compact's `persistentHash<Bytes<32>>` ≡ Node's `createHash('sha256')`. This is the load-bearing invariant of the cross-chain lock; if it ever diverged, swaps would silently fail. Run with `cd contract && npm test`.
+- `htlc-ft-cli/src/smoke-native.ts` — deposits + reclaims on Midnight only (no Cardano), useful for shaking out the `receiveUnshielded`/`sendUnshielded` path after contract edits.
+- `htlc-ft-cli/src/smoke-cardano-reclaim.ts` — locks on Cardano and reclaims past the deadline. Exercises the `Reclaim` redeemer and the validFrom slot-alignment offset.
+- `htlc-ft-cli/src/execute-swap.ts` — full end-to-end automated regression. Run any time both chains are online.
 
 ## Key Files to Read First
 
-If you're picking this up fresh, read in this order:
-1. `contract/src/htlc-ft.compact` — understand the contract API
-2. `cardano/validators/htlc.ak` — understand the Cardano side
-3. `htlc-ft-cli/src/execute-swap.ts` — the working end-to-end flow
-4. `htlc-ft-cli/src/cardano-htlc.ts` — Cardano off-chain module
-5. `htlc-ft-cli/src/midnight-watcher.ts` — how to read Midnight contract state
-6. `htlc-ft-cli/src/alice-swap.ts` / `bob-swap.ts` — the new split flows (need alignment)
-7. `contract/src/usdc.compact` — the standalone token contract (for reference)
+1. `contract/src/htlc.compact` — the escrow
+2. `contract/src/usdc.compact` — the token minter
+3. `cardano/validators/htlc.ak` — the Cardano side
+4. `htlc-ft-cli/src/execute-swap.ts` — the regression harness
+5. `htlc-ft-cli/src/alice-swap.ts` / `bob-swap.ts` — two-terminal flows
+6. `htlc-ft-cli/src/cardano-watcher.ts` / `midnight-watcher.ts` — watchers
+7. `htlc-ft-cli/src/cardano-htlc.ts` — Cardano off-chain module
 
-## Running the Existing Working Swap
+## Running a Swap
 
-Prerequisites: Midnight local dev node running, Cardano Preprod Blockfrost key in `.env`, wallets funded.
+Prereqs: Midnight local dev node up, Cardano Preprod Blockfrost key in `.env`, wallets funded.
+
+### One-shot regression
 
 ```bash
-# From htlc-ft-cli/
+cd htlc-ft-cli
 npx tsx src/execute-swap.ts
 ```
 
-This deploys a fresh contract, mints tokens, and runs the full 6-step swap automatically.
+### Two-terminal flow
+
+```bash
+# Setup (once)
+cd htlc-ft-cli
+npx tsx src/setup-contract.ts           # writes swap-state.json
+
+# Terminal 1 (Alice locks ADA, waits for Bob's USDC)
+npx tsx src/alice-swap.ts               # or --yes for unattended
+
+# Terminal 2 (Bob picks up the hash from pending-swap.json, deposits USDC)
+npx tsx src/bob-swap.ts                 # or --yes / --hash <hex>
+```
+
+Bob's watcher requires `pending-swap.json` (written by Alice after her lock) OR a `--hash` CLI arg / `SWAP_HASH` env var. Without one, it falls back to "first fresh lock for Bob" which is unsafe when the script address holds concurrent UTXOs from other swaps.
