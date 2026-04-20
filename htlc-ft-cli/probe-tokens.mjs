@@ -1,0 +1,10 @@
+import { nativeToken, unshieldedToken, feeToken, shieldedToken } from '@midnight-ntwrk/ledger-v8';
+const n = nativeToken();
+const u = unshieldedToken();
+const f = feeToken();
+const s = shieldedToken();
+console.log('nativeToken()     =', JSON.stringify(n));
+console.log('unshieldedToken() =', JSON.stringify(u));
+console.log('feeToken()        =', JSON.stringify(f));
+console.log('shieldedToken()   =', JSON.stringify(s));
+console.log('nativeToken.raw === unshieldedToken.raw ?', n.raw === u.raw);

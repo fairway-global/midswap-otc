@@ -36,8 +36,10 @@ const isProgressStrictlyComplete = (progress: unknown): boolean => {
   return (candidate.isStrictlyComplete as () => boolean)();
 };
 
+// Shielded sync is intentionally excluded — this codebase only uses unshielded coins
+// (USDC, tNight). On preprod, shielded first-sync from genesis takes too long and
+// blocking on it is gratuitous.
 const isFacadeStateSynced = (state: FacadeState): boolean =>
-  isProgressStrictlyComplete(state.shielded.state.progress) &&
   isProgressStrictlyComplete(state.dust.state.progress) &&
   isProgressStrictlyComplete(state.unshielded.progress);
 
@@ -46,23 +48,14 @@ export const syncWallet = (logger: Logger, wallet: WalletFacade, throttleTime = 
 
   return Rx.firstValueFrom(
     wallet.state().pipe(
-      Rx.tap((state: FacadeState) => {
-        const shieldedSynced = isProgressStrictlyComplete(state.shielded.state.progress);
-        const unshieldedSynced = isProgressStrictlyComplete(state.unshielded.progress);
-        const dustSynced = isProgressStrictlyComplete(state.dust.state.progress);
-        logger.debug(
-          `Wallet synced state emission: { shielded=${shieldedSynced}, unshielded=${unshieldedSynced}, dust=${dustSynced} }`,
-        );
-      }),
       Rx.throttleTime(throttleTime),
       Rx.tap((state: FacadeState) => {
         const shieldedSynced = isProgressStrictlyComplete(state.shielded.state.progress);
         const unshieldedSynced = isProgressStrictlyComplete(state.unshielded.progress);
         const dustSynced = isProgressStrictlyComplete(state.dust.state.progress);
         const isSynced = shieldedSynced && dustSynced && unshieldedSynced;
-
-        logger.debug(
-          `Wallet synced state emission (synced=${isSynced}): { shielded=${shieldedSynced}, unshielded=${unshieldedSynced}, dust=${dustSynced} }`,
+        logger.info(
+          `Sync progress (complete=${isSynced}): shielded=${shieldedSynced}, unshielded=${unshieldedSynced}, dust=${dustSynced}`,
         );
       }),
       Rx.filter((state: FacadeState) => isFacadeStateSynced(state)),
@@ -101,15 +94,20 @@ export const waitForUnshieldedFunds = async (
     logger.info(`Waiting to receive tokens...`);
     return Rx.firstValueFrom(
       wallet.state().pipe(
+        Rx.throttleTime(throttleTime),
         Rx.tap((state: FacadeState) => {
           const balance = state.unshielded.balances[tokenType.raw] ?? 0n;
-          logger.debug(
-            `Wallet funds state emission: { synced=${isFacadeStateSynced(state)}, balance=${balance.toString()} }`,
+          const unshieldedSynced = isProgressStrictlyComplete(state.unshielded.progress);
+          logger.info(
+            `Waiting for unshielded funds: synced=${unshieldedSynced}, balance=${balance.toString()}`,
           );
         }),
-        Rx.throttleTime(throttleTime),
+        // Don't require dust here — waitForUnshieldedFunds runs *before* generateDust,
+        // so a dust check would deadlock. We only need the unshielded balance to appear.
         Rx.filter(
-          (state: FacadeState) => isFacadeStateSynced(state) && (state.unshielded.balances[tokenType.raw] ?? 0n) > 0n,
+          (state: FacadeState) =>
+            isProgressStrictlyComplete(state.unshielded.progress) &&
+            (state.unshielded.balances[tokenType.raw] ?? 0n) > 0n,
         ),
         Rx.tap(() => logger.info('Sync complete')),
         Rx.tap((state: FacadeState) => {

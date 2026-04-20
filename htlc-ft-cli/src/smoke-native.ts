@@ -33,8 +33,8 @@ import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { deployContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
-import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { type EnvironmentConfiguration } from '@midnight-ntwrk/testkit-js';
+import { getMidnightEnv, applyMidnightNetwork } from './config';
 import {
   CompiledUSDCContract,
   usdcPrivateStateKey,
@@ -64,16 +64,7 @@ globalThis.WebSocket = WebSocket;
 
 const scriptDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
-const env: EnvironmentConfiguration = {
-  walletNetworkId: 'undeployed',
-  networkId: 'undeployed',
-  indexer: 'http://127.0.0.1:8088/api/v3/graphql',
-  indexerWS: 'ws://127.0.0.1:8088/api/v3/graphql/ws',
-  node: 'http://127.0.0.1:9944',
-  nodeWS: 'ws://127.0.0.1:9944',
-  faucet: '',
-  proofServer: 'http://127.0.0.1:6300',
-};
+const env: EnvironmentConfiguration = getMidnightEnv();
 
 const TOKEN_NAME = 'USD Coin';
 const TOKEN_SYMBOL = 'USDC';
@@ -137,7 +128,7 @@ function buildHtlcProviders(wp: MidnightWalletProvider, seed: string): HTLCProvi
 }
 
 async function main() {
-  setNetworkId('undeployed');
+  applyMidnightNetwork();
 
   const addresses = JSON.parse(
     fs.readFileSync(path.resolve(scriptDir, '..', 'address.json'), 'utf-8'),
@@ -161,12 +152,14 @@ async function main() {
   const wp = await MidnightWalletProvider.build(logger, env, aliceSeed);
   await wp.start();
   const unshielded = await waitForUnshieldedFunds(logger, wp.wallet, env, unshieldedToken());
-  const dustTx = await generateDust(logger, aliceSeed, unshielded, wp.wallet);
-  if (dustTx) await syncWallet(logger, wp.wallet);
+  await generateDust(logger, aliceSeed, unshielded, wp.wallet);
 
-  // Deterministic domain separator for USDC color
+  // Per-run domain separator: Midnight contract addresses are deterministic
+  // from constructor args + domainSep, so reusing the same seed across runs
+  // collides with any prior deploy (ledger rejects as ContractAlreadyDeployed,
+  // which surfaces as Substrate Custom error: 170).
   const domainSep = new Uint8Array(
-    crypto.createHash('sha256').update('midnight-usdc-smoke-v1').digest(),
+    crypto.createHash('sha256').update(`midnight-usdc-smoke-v1-${Date.now()}`).digest(),
   );
 
   // Deploy USDC

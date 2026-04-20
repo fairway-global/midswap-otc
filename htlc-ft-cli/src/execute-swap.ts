@@ -27,8 +27,8 @@ import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
-import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { type EnvironmentConfiguration } from '@midnight-ntwrk/testkit-js';
+import { getMidnightEnv, applyMidnightNetwork } from './config';
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { generateDust } from './generate-dust';
 import {
@@ -75,16 +75,7 @@ const DOMAIN_SEP_SOURCE = 'midnight-usdc-swap-v1';
 
 const scriptDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
-const env: EnvironmentConfiguration = {
-  walletNetworkId: 'undeployed',
-  networkId: 'undeployed',
-  indexer: 'http://127.0.0.1:8088/api/v3/graphql',
-  indexerWS: 'ws://127.0.0.1:8088/api/v3/graphql/ws',
-  node: 'http://127.0.0.1:9944',
-  nodeWS: 'ws://127.0.0.1:9944',
-  faucet: '',
-  proofServer: 'http://127.0.0.1:6300',
-};
+const env: EnvironmentConfiguration = getMidnightEnv();
 
 // ─────────────────────────────────────────────────────────────────────
 // Helpers
@@ -186,7 +177,7 @@ function buildUsdcProviders(
 
 async function main() {
   loadEnv();
-  setNetworkId('undeployed');
+  applyMidnightNetwork();
 
   const addresses = JSON.parse(
     fs.readFileSync(path.resolve(scriptDir, '..', 'address.json'), 'utf-8'),
@@ -214,10 +205,7 @@ async function main() {
   const aliceUnshielded = await waitForUnshieldedFunds(logger, aliceWallet.wallet, env, unshieldedToken());
 
   const aliceDustTx = await generateDust(logger, addresses.alice.midnight.seed, aliceUnshielded, aliceWallet.wallet);
-  if (aliceDustTx) {
-    console.log(`Alice dust registration tx: ${aliceDustTx}`);
-    await syncWallet(logger, aliceWallet.wallet);
-  }
+  if (aliceDustTx) console.log(`Alice dust registration tx: ${aliceDustTx}`);
 
   const aliceUserAddrHex = addresses.alice.midnight.unshieldedAddressHex;
   const aliceCoinPubKey = aliceWallet.getCoinPublicKey();
@@ -231,10 +219,7 @@ async function main() {
   const bobUnshielded = await waitForUnshieldedFunds(logger, bobWallet.wallet, env, unshieldedToken());
 
   const bobDustTx = await generateDust(logger, addresses.bob.midnight.seed, bobUnshielded, bobWallet.wallet);
-  if (bobDustTx) {
-    console.log(`Bob dust registration tx: ${bobDustTx}`);
-    await syncWallet(logger, bobWallet.wallet);
-  }
+  if (bobDustTx) console.log(`Bob dust registration tx: ${bobDustTx}`);
 
   const bobUserAddrHex = addresses.bob.midnight.unshieldedAddressHex;
   const bobCoinPubKey = bobWallet.getCoinPublicKey();

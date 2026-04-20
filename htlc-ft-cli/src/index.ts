@@ -21,7 +21,7 @@ import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import { TestEnvironment } from '@midnight-ntwrk/testkit-js';
 import { MidnightWalletProvider } from './midnight-wallet-provider';
 import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
-import { syncWallet, waitForUnshieldedFunds } from './wallet-utils';
+import { waitForUnshieldedFunds } from './wallet-utils';
 import { generateDust } from './generate-dust';
 import { deployContract, findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import {
@@ -486,7 +486,6 @@ export const run = async (config: Config, testEnv: TestEnvironment, logger: Logg
       const dustGeneration = await generateDust(logger, seed, unshieldedState, walletFacade);
       if (dustGeneration) {
         logger.info(`Submitted dust generation registration transaction: ${dustGeneration}`);
-        await syncWallet(logger, walletFacade);
       }
     }
 

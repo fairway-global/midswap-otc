@@ -11,24 +11,15 @@ import { createLogger } from './logger-utils.js';
 import { MidnightWalletProvider } from './midnight-wallet-provider';
 import { syncWallet } from './wallet-utils';
 import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
-import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { type EnvironmentConfiguration } from '@midnight-ntwrk/testkit-js';
+import { getMidnightEnv, applyMidnightNetwork, getMidnightNetwork } from './config';
 
 const scriptDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
-const env: EnvironmentConfiguration = {
-  walletNetworkId: 'undeployed',
-  networkId: 'undeployed',
-  indexer: 'http://127.0.0.1:8088/api/v3/graphql',
-  indexerWS: 'ws://127.0.0.1:8088/api/v3/graphql/ws',
-  node: 'http://127.0.0.1:9944',
-  nodeWS: 'ws://127.0.0.1:9944',
-  faucet: '',
-  proofServer: 'http://127.0.0.1:6300',
-};
+const env: EnvironmentConfiguration = getMidnightEnv();
 
 async function main() {
-  setNetworkId('undeployed');
+  const net = applyMidnightNetwork();
 
   const addressPath = path.resolve(scriptDir, '..', 'address.json');
   const addresses = JSON.parse(fs.readFileSync(addressPath, 'utf-8'));
@@ -36,7 +27,7 @@ async function main() {
   const logDir = path.resolve(scriptDir, '..', 'logs', 'check-balance', `${new Date().toISOString()}.log`);
   const logger = await createLogger(logDir);
 
-  console.log('=== Midnight (undeployed) tNight Balances ===\n');
+  console.log(`=== Midnight (${net}) tNight Balances ===\n`);
 
   const tokenType = unshieldedToken().raw;
 
@@ -50,8 +41,11 @@ async function main() {
     const syncedState = await syncWallet(logger, walletProvider.wallet);
     const balance = syncedState.unshielded.balances[tokenType] ?? 0n;
 
+    const displayAddress = net === 'preprod'
+      ? wallets.midnight.preprodAddress
+      : wallets.midnight.undeployedAddress;
     console.log(`${name.toUpperCase()}`);
-    console.log(`  Address:  ${wallets.midnight.undeployedAddress}`);
+    console.log(`  Address:  ${displayAddress}`);
     console.log(`  Balance:  ${balance} tNight`);
     console.log();
 

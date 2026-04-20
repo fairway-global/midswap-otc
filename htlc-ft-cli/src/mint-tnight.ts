@@ -15,9 +15,10 @@ import { MidnightWalletProvider } from './midnight-wallet-provider';
 import { syncWallet, waitForUnshieldedFunds } from './wallet-utils';
 import { UnshieldedAddress, MidnightBech32m } from '@midnight-ntwrk/wallet-sdk-address-format';
 import { unshieldedToken, ZswapSecretKeys, DustSecretKey } from '@midnight-ntwrk/ledger-v8';
-import { setNetworkId, getNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+import { getNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { ttlOneHour } from '@midnight-ntwrk/midnight-js-utils';
 import { type EnvironmentConfiguration } from '@midnight-ntwrk/testkit-js';
+import { getMidnightEnv, applyMidnightNetwork, getMidnightNetwork } from './config';
 import { type CombinedTokenTransfer } from '@midnight-ntwrk/wallet-sdk-facade';
 import { HDWallet, Roles } from '@midnight-ntwrk/wallet-sdk-hd';
 import { createKeystore } from '@midnight-ntwrk/wallet-sdk-unshielded-wallet';
@@ -27,16 +28,7 @@ const scriptDir = path.resolve(new URL(import.meta.url).pathname, '..');
 const GENESIS_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const AMOUNT_PER_WALLET = 1_000_000_000_000n; // 1T tNight — needed for 500Q+ dust (additionalFeeOverhead on local dev)
 
-const env: EnvironmentConfiguration = {
-  walletNetworkId: 'undeployed',
-  networkId: 'undeployed',
-  indexer: 'http://127.0.0.1:8088/api/v3/graphql',
-  indexerWS: 'ws://127.0.0.1:8088/api/v3/graphql/ws',
-  node: 'http://127.0.0.1:9944',
-  nodeWS: 'ws://127.0.0.1:9944',
-  faucet: '',
-  proofServer: 'http://127.0.0.1:6300',
-};
+const env: EnvironmentConfiguration = getMidnightEnv();
 
 /** Derive the unshielded seed (NightExternal role) from a master seed. */
 function getUnshieldedSeed(masterSeedHex: string): Uint8Array {
@@ -57,7 +49,12 @@ function getUnshieldedAddress(masterSeedHex: string, networkId: string): { bech3
 }
 
 async function main() {
-  setNetworkId('undeployed');
+  if (getMidnightNetwork() !== 'undeployed') {
+    throw new Error(
+      `mint-tnight is local-dev only (uses GENESIS_SEED). On preprod, fund wallets via the faucet (https://faucet.preprod.midnight.network/).`,
+    );
+  }
+  applyMidnightNetwork();
 
   const addressPath = path.resolve(scriptDir, '..', 'address.json');
   const addresses = JSON.parse(fs.readFileSync(addressPath, 'utf-8'));

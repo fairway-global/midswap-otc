@@ -1,0 +1,11 @@
+{
+  "htlcContractAddress": "a6bb06cf6c6c28c523a8bc029765e4bc03a6d510a944ec1418fa9517a826592c",
+  "usdcContractAddress": "8c23f87b33c0b941e1f9cdb5cf5cb7e25843e67a71f61f958d642bbe4b1ece9b",
+  "usdcColor": "c639d0a79e6405834dbfe72c244ac357a90abb92ac076a0c0235d26c9ad1a1c6",
+  "tokenName": "USD Coin",
+  "tokenSymbol": "USDC",
+  "tokenDecimals": 6,
+  "domainSepHex": "26cdb2c3adfeb12e0d487dfbd80e3822e110fa68ca05fd3d85c6210799958cfd",
+  "deployedAt": "2026-04-20T10:04:32.845Z",
+  "network": "undeployed"
+}

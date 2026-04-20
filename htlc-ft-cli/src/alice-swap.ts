@@ -21,7 +21,7 @@ import { WebSocket } from 'ws';
 import { createHash } from 'node:crypto';
 import { createLogger } from './logger-utils.js';
 import { MidnightWalletProvider } from './midnight-wallet-provider';
-import { syncWallet, waitForUnshieldedFunds } from './wallet-utils';
+import { waitForUnshieldedFunds } from './wallet-utils';
 import { generateDust } from './generate-dust';
 import { watchForHTLCDeposit } from './midnight-watcher';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
@@ -30,8 +30,8 @@ import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client
 import { levelPrivateStateProvider } from '@midnight-ntwrk/midnight-js-level-private-state-provider';
 import { findDeployedContract } from '@midnight-ntwrk/midnight-js-contracts';
 import { unshieldedToken } from '@midnight-ntwrk/ledger-v8';
-import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
 import { type EnvironmentConfiguration } from '@midnight-ntwrk/testkit-js';
+import { getMidnightEnv, applyMidnightNetwork } from './config';
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
 import {
   CompiledHTLCContract,
@@ -47,16 +47,7 @@ globalThis.WebSocket = WebSocket;
 
 const scriptDir = path.resolve(new URL(import.meta.url).pathname, '..');
 
-const env: EnvironmentConfiguration = {
-  walletNetworkId: 'undeployed',
-  networkId: 'undeployed',
-  indexer: 'http://127.0.0.1:8088/api/v3/graphql',
-  indexerWS: 'ws://127.0.0.1:8088/api/v3/graphql/ws',
-  node: 'http://127.0.0.1:9944',
-  nodeWS: 'ws://127.0.0.1:9944',
-  faucet: '',
-  proofServer: 'http://127.0.0.1:6300',
-};
+const env: EnvironmentConfiguration = getMidnightEnv();
 
 function sha256(data: Uint8Array): Uint8Array {
   return new Uint8Array(createHash('sha256').update(data).digest());
@@ -100,7 +91,7 @@ function buildHtlcProviders(walletProvider: MidnightWalletProvider, seed: string
 
 async function main() {
   loadEnv();
-  setNetworkId('undeployed');
+  applyMidnightNetwork();
 
   // Non-interactive mode: `--yes` flag or ALICE_ACCEPT_ALL=1 env var uses defaults
   // for ADA/USDC amount + deadline, and aborts on warnings (safe default).
@@ -160,8 +151,7 @@ async function main() {
   const walletProvider = await MidnightWalletProvider.build(logger, env, aliceSeed);
   await walletProvider.start();
   const unshielded = await waitForUnshieldedFunds(logger, walletProvider.wallet, env, unshieldedToken());
-  const dustTx = await generateDust(logger, aliceSeed, unshielded, walletProvider.wallet);
-  if (dustTx) await syncWallet(logger, walletProvider.wallet);
+  await generateDust(logger, aliceSeed, unshielded, walletProvider.wallet);
 
   console.log('Joining HTLC contract on Midnight...');
   const providers = buildHtlcProviders(walletProvider, aliceSeed);
