@@ -1,0 +1,167 @@
+{
+  "preamble": {
+    "title": "kaleababayneh/cardano-htlc",
+    "description": "HTLC validator for cross-chain atomic swap with Midnight using SHA-256",
+    "version": "0.0.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.19+e525483"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": [
+    {
+      "title": "htlc.htlc.spend",
+      "datum": {
+        "title": "datum",
+        "schema": {
+          "$ref": "#/definitions/htlc~1types~1HTLCDatum"
+        }
+      },
+      "redeemer": {
+        "title": "redeemer",
+        "schema": {
+          "$ref": "#/definitions/htlc~1types~1HTLCRedeemer"
+        }
+      },
+      "compiledCode": "59024901010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cdc3a400530080024888966002600460106ea800e26466453001159800980098059baa0028cc004c03cc030dd500148c040c044c044c044c044c044c044c044c0440064602060226022602260226022602260220032232330010010032259800800c528456600266e3cdd71809800801c528c4cc008008c05000500e202291808180898089808800c8c040c04400522222259800980398089baa00d899912cc004cdc79b92375c602e60286ea803cdd7180b980a1baa0088acc004cc014008dd7180b980c180c180a1baa0088acc004c024c04cdd5000c4cdc49bad3017301437540026eb4c010c050dd5004452820248a50404914a08090dd6180298091baa00a3259800980618091baa001899ba548000cc054c058c04cdd5000a5eb822980103d87a80004044602a60246ea8c004c048dd5180218091baa00a899912cc004cc014008dd71801980a1baa0088acc004c024c04cdd5000c4cdc41bad3004301437540106eb4c05cc050dd5000c52820248a5040486eb0c014c048dd5005192cc004c030c048dd5000c4cdd2a40006602a602c60266ea80052f5c114c0103d87a80004044602a60246ea8c054c048dd5180218091baa00a40408b201498059baa0079807801a444b30013004002899192cc004c05400a00b1640486eb8c04c004c03cdd50054566002601000515980098079baa00a801c5901045900d201a180698070009b8748000c024dd5001c590070c020004c00cdd5004452689b2b20021",
+      "hash": "272e87e6a260e90df2efbeae71872bdf43a680b76dac6da1018e99c4"
+    },
+    {
+      "title": "htlc.htlc.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "compiledCode": "59024901010029800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cdc3a400530080024888966002600460106ea800e26466453001159800980098059baa0028cc004c03cc030dd500148c040c044c044c044c044c044c044c044c0440064602060226022602260226022602260220032232330010010032259800800c528456600266e3cdd71809800801c528c4cc008008c05000500e202291808180898089808800c8c040c04400522222259800980398089baa00d899912cc004cdc79b92375c602e60286ea803cdd7180b980a1baa0088acc004cc014008dd7180b980c180c180a1baa0088acc004c024c04cdd5000c4cdc49bad3017301437540026eb4c010c050dd5004452820248a50404914a08090dd6180298091baa00a3259800980618091baa001899ba548000cc054c058c04cdd5000a5eb822980103d87a80004044602a60246ea8c004c048dd5180218091baa00a899912cc004cc014008dd71801980a1baa0088acc004c024c04cdd5000c4cdc41bad3004301437540106eb4c05cc050dd5000c52820248a5040486eb0c014c048dd5005192cc004c030c048dd5000c4cdd2a40006602a602c60266ea80052f5c114c0103d87a80004044602a60246ea8c054c048dd5180218091baa00a40408b201498059baa0079807801a444b30013004002899192cc004c05400a00b1640486eb8c04c004c03cdd50054566002601000515980098079baa00a801c5901045900d201a180698070009b8748000c024dd5001c590070c020004c00cdd5004452689b2b20021",
+      "hash": "272e87e6a260e90df2efbeae71872bdf43a680b76dac6da1018e99c4"
+    },
+    {
+      "title": "swap_token.swap_token.mint",
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Data"
+        }
+      },
+      "parameters": [
+        {
+          "title": "utxo_ref",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        }
+      ],
+      "compiledCode": "5887010100229800aba2aba1aab9faab9eaab9dab9a48888896600264646644b30013370e900018031baa00189991198008009bac300b30093754601600c6eb8c024c01cdd5000912cc00400629422b30013375e601660126ea8c02c00403a29462660040046018002803900a459005180380098039804000980380098019baa0078a4d13656400401",
+      "hash": "b1a80f2cee058198c38a5f16ab14180fbe9a570c6745dbc1969fbcdb"
+    },
+    {
+      "title": "swap_token.swap_token.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "parameters": [
+        {
+          "title": "utxo_ref",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        }
+      ],
+      "compiledCode": "5887010100229800aba2aba1aab9faab9eaab9dab9a48888896600264646644b30013370e900018031baa00189991198008009bac300b30093754601600c6eb8c024c01cdd5000912cc00400629422b30013375e601660126ea8c02c00403a29462660040046018002803900a459005180380098039804000980380098019baa0078a4d13656400401",
+      "hash": "b1a80f2cee058198c38a5f16ab14180fbe9a570c6745dbc1969fbcdb"
+    }
+  ],
+  "definitions": {
+    "ByteArray": {
+      "title": "ByteArray",
+      "dataType": "bytes"
+    },
+    "Data": {
+      "title": "Data",
+      "description": "Any Plutus data."
+    },
+    "Int": {
+      "dataType": "integer"
+    },
+    "cardano/transaction/OutputReference": {
+      "title": "OutputReference",
+      "description": "An `OutputReference` is a unique reference to an output on-chain. The `output_index`\n corresponds to the position in the output list of the transaction (identified by its id)\n that produced that output",
+      "anyOf": [
+        {
+          "title": "OutputReference",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "transaction_id",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "output_index",
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        }
+      ]
+    },
+    "htlc/types/HTLCDatum": {
+      "title": "HTLCDatum",
+      "description": "Types for the HTLC atomic swap validator.\n Datum attached to the locked UTxO at the script address.",
+      "anyOf": [
+        {
+          "title": "HTLCDatum",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "preimage_hash",
+              "description": "SHA-256 hash of the secret preimage (32 bytes).\n Identical to Midnight's persistentHash(Bytes<32>, preimage).",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "sender",
+              "description": "Verification key hash of the sender who deposited funds",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "receiver",
+              "description": "Verification key hash of the receiver who can claim with preimage",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "deadline",
+              "description": "POSIX deadline in milliseconds — receiver must claim before this",
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        }
+      ]
+    },
+    "htlc/types/HTLCRedeemer": {
+      "title": "HTLCRedeemer",
+      "description": "Redeemer specifying which action to perform on the HTLC.",
+      "anyOf": [
+        {
+          "title": "Withdraw",
+          "description": "Receiver reveals the preimage to claim the locked funds",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "preimage",
+              "$ref": "#/definitions/ByteArray"
+            }
+          ]
+        },
+        {
+          "title": "Reclaim",
+          "description": "Sender reclaims the locked funds after the deadline passes",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": []
+        }
+      ]
+    }
+  }
+}

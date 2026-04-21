@@ -14,7 +14,8 @@
       "bboard-ui",
       "api",
       "contract",
-      "htlc-ft-cli"
+      "htlc-ft-cli",
+      "htlc-ui"
     ]
   },
   "dependencies": {
