@@ -291,7 +291,7 @@ export const AliceSwap: React.FC = () => {
     const ada = BigInt(adaAmount);
     const usdc = BigInt(usdcAmount);
     const min = parseInt(deadlineMin, 10);
-    if (!Number.isFinite(min) || min < 60) {
+    if (!Number.isFinite(min) || min < 3) {
       setFormError('Deadline must be ≥ 60 minutes (Bob needs ≥ 30min + dust-sync time).');
       return;
     }

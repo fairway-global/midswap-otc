@@ -39,9 +39,9 @@ const describeError = (e: unknown): string => {
   }
 };
 
-const SAFETY_BUFFER_SECS = 600; // 10 min
-const MIN_CARDANO_DEADLINE_WINDOW_SECS = 1800; // 30 min
-const BOB_DEADLINE_MIN = 60;
+const SAFETY_BUFFER_SECS = 60; // 10 min
+const MIN_CARDANO_DEADLINE_WINDOW_SECS = 180; // 30 min
+const BOB_DEADLINE_MIN = 2;
 
 interface URLInputs {
   hashHex: string;
