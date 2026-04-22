@@ -179,20 +179,34 @@ export const startMidnightWatcher = (
       if (stopped) return;
       try {
         const hashBytes = hexToBytes(swap.hash);
-        if (!decoded.revealedPreimages.member(hashBytes)) continue;
-        if (swap.midnightPreimage) continue;
 
-        const preimage = decoded.revealedPreimages.lookup(hashBytes);
-        const preimageHex = bytesToHex(preimage);
-        const updated = store.patch(swap.hash, {
-          status: 'alice_claimed',
-          midnightPreimage: preimageHex,
-        });
-        if (updated) {
-          logger.info(
-            { hash: swap.hash.slice(0, 16) },
-            'midnight-watcher: bob_deposited → alice_claimed (preimage revealed on-chain)',
-          );
+        if (decoded.revealedPreimages.member(hashBytes)) {
+          if (swap.midnightPreimage) continue;
+          const preimage = decoded.revealedPreimages.lookup(hashBytes);
+          const preimageHex = bytesToHex(preimage);
+          const updated = store.patch(swap.hash, {
+            status: 'alice_claimed',
+            midnightPreimage: preimageHex,
+          });
+          if (updated) {
+            logger.info(
+              { hash: swap.hash.slice(0, 16) },
+              'midnight-watcher: bob_deposited → alice_claimed (preimage revealed on-chain)',
+            );
+          }
+          continue;
+        }
+
+        const amountIsZero =
+          decoded.htlcAmounts.member(hashBytes) && decoded.htlcAmounts.lookup(hashBytes) === 0n;
+        if (amountIsZero) {
+          const updated = store.patch(swap.hash, { status: 'bob_reclaimed' });
+          if (updated) {
+            logger.info(
+              { hash: swap.hash.slice(0, 16) },
+              'midnight-watcher: bob_deposited → bob_reclaimed (no preimage reveal; Bob refunded)',
+            );
+          }
         }
       } catch (err) {
         logger.warn({ err, hash: swap.hash.slice(0, 16) }, 'midnight-watcher: deposited-swap check failed');

@@ -1,6 +1,11 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { resolve } from 'node:path';
+import {
+  resolveCardanoWatcherConfig,
+  startCardanoWatcher,
+  type CardanoWatcher,
+} from './cardano-watcher.js';
 import { openSwapStore } from './db.js';
 import { resolveWatcherConfig, startMidnightWatcher, type MidnightWatcher } from './midnight-watcher.js';
 import { swapsRoutes } from './routes/swaps.js';
@@ -31,15 +36,22 @@ app.get('/health', async () => ({ ok: true, db: DB_PATH }));
 
 await app.register(swapsRoutes(store), { prefix: '/api' });
 
-let watcher: MidnightWatcher | null = null;
-const watcherConfig = resolveWatcherConfig(app.log);
-if (watcherConfig) {
-  watcher = startMidnightWatcher(store, watcherConfig, app.log);
+let midnightWatcher: MidnightWatcher | null = null;
+const midnightWatcherConfig = resolveWatcherConfig(app.log);
+if (midnightWatcherConfig) {
+  midnightWatcher = startMidnightWatcher(store, midnightWatcherConfig, app.log);
+}
+
+let cardanoWatcher: CardanoWatcher | null = null;
+const cardanoWatcherConfig = resolveCardanoWatcherConfig(app.log);
+if (cardanoWatcherConfig) {
+  cardanoWatcher = startCardanoWatcher(store, cardanoWatcherConfig, app.log);
 }
 
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'shutting down');
-  watcher?.stop();
+  midnightWatcher?.stop();
+  cardanoWatcher?.stop();
   await app.close();
   store.close();
   process.exit(0);
