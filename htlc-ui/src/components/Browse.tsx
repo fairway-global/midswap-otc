@@ -40,12 +40,15 @@ const formatRemaining = (deadlineMs: number): string => {
 
 export const Browse: React.FC = () => {
   const navigate = useNavigate();
-  const { cardano } = useSwapContext();
+  const { cardano, session } = useSwapContext();
   const [swaps, setSwaps] = useState<Swap[] | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
 
   const myPkh = cardano?.paymentKeyHash?.toLowerCase();
+  const myCpk = session?.bootstrap.coinPublicKeyHex?.toLowerCase();
+  const visibleSwaps = swaps?.filter((s) => !myCpk || s.aliceCpk.toLowerCase() !== myCpk);
+  const ownCount = swaps && myCpk ? swaps.length - (visibleSwaps?.length ?? 0) : 0;
 
   const refresh = useCallback(async () => {
     setError(undefined);
@@ -118,7 +121,15 @@ export const Browse: React.FC = () => {
         </Stack>
       )}
 
-      {swaps && swaps.length === 0 && (
+      {ownCount > 0 && (
+        <Alert severity="info">
+          {ownCount === 1
+            ? 'Your own open offer is hidden here — manage it on the Alice page.'
+            : `${ownCount} of your own open offers are hidden here — manage them on the Alice page.`}
+        </Alert>
+      )}
+
+      {visibleSwaps && visibleSwaps.length === 0 && (
         <Card>
           <CardContent>
             <Typography>No open offers right now. Come back later or ask Alice for a share URL.</Typography>
@@ -126,7 +137,7 @@ export const Browse: React.FC = () => {
         </Card>
       )}
 
-      {swaps?.map((swap) => {
+      {visibleSwaps?.map((swap) => {
         const remaining = swap.cardanoDeadlineMs - Date.now();
         const expired = remaining <= 0;
         const unsafe = remaining < MIN_REMAINING_SECS * 1000;

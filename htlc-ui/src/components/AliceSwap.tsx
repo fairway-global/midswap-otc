@@ -5,7 +5,7 @@
  * Faithful port of `htlc-ft-cli/src/alice-swap.ts`.
  */
 
-import React, { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -15,6 +15,7 @@ import {
   CircularProgress,
   Divider,
   IconButton,
+  Link,
   Stack,
   TextField,
   Typography,
@@ -91,6 +92,7 @@ type Action =
   | { t: 'to-params' }
   | { t: 'to-locking' }
   | { t: 'locked'; payload: Extract<Step, { kind: 'locked' }> }
+  | { t: 'restore'; payload: Extract<Step, { kind: 'waiting-deposit' }> }
   | { t: 'to-waiting' }
   | { t: 'deposit-seen'; depositAmount: bigint; depositColorHex: string }
   | { t: 'to-claiming' }
@@ -105,6 +107,8 @@ const reducer = (state: Step, action: Action): Step => {
     case 'to-locking':
       return { kind: 'locking' };
     case 'locked':
+      return action.payload;
+    case 'restore':
       return action.payload;
     case 'to-waiting':
       return state.kind === 'locked' ? { ...state, kind: 'waiting-deposit' } : state;
@@ -138,6 +142,42 @@ const reducer = (state: Step, action: Action): Step => {
   }
 };
 
+const PENDING_KEY_PREFIX = 'htlc-ui:alice-pending-swap:';
+
+interface PersistedSwap {
+  hashHex: string;
+  preimageHex: string;
+  lockTxHash: string;
+  deadlineMs: string;
+  adaAmount: string;
+  usdcAmount: string;
+}
+
+const savePending = (aliceCpk: string, swap: PersistedSwap): void => {
+  try {
+    localStorage.setItem(PENDING_KEY_PREFIX + aliceCpk, JSON.stringify(swap));
+  } catch (e) {
+    console.warn('[AliceSwap] localStorage save failed', e);
+  }
+};
+
+const loadPending = (aliceCpk: string): PersistedSwap | undefined => {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY_PREFIX + aliceCpk);
+    return raw ? (JSON.parse(raw) as PersistedSwap) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const clearPending = (aliceCpk: string): void => {
+  try {
+    localStorage.removeItem(PENDING_KEY_PREFIX + aliceCpk);
+  } catch {
+    /* ignore */
+  }
+};
+
 const sha256 = async (bytes: Uint8Array): Promise<Uint8Array> => {
   const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
   return new Uint8Array(digest);
@@ -168,6 +208,8 @@ const describeError = (e: unknown): string => {
 export const AliceSwap: React.FC = () => {
   const { session, cardano, swapState } = useSwapContext();
   const [state, dispatch] = useReducer(reducer, { kind: 'connect' as const });
+  const restoreAttemptedRef = useRef(false);
+  const [restoreNotice, setRestoreNotice] = useState<string | undefined>(undefined);
 
   // Form inputs.
   const [adaAmount, setAdaAmount] = useState<string>('1');
@@ -182,6 +224,42 @@ export const AliceSwap: React.FC = () => {
       dispatch({ t: 'to-params' });
     }
   }, [session, cardano, state.kind]);
+
+  // Resume a pending swap stored in localStorage (survives browser close).
+  // Only the preimage needs to be local; everything else is in the orchestrator.
+  useEffect(() => {
+    if (!session || restoreAttemptedRef.current) return;
+    restoreAttemptedRef.current = true;
+    const aliceCpk = session.bootstrap.coinPublicKeyHex;
+    const pending = loadPending(aliceCpk);
+    if (!pending) return;
+    void (async () => {
+      const dbSwap = await orchestratorClient.getSwap(pending.hashHex).catch(() => undefined);
+      if (
+        dbSwap &&
+        (dbSwap.status === 'alice_claimed' ||
+          dbSwap.status === 'completed' ||
+          dbSwap.status === 'alice_reclaimed' ||
+          dbSwap.status === 'expired')
+      ) {
+        clearPending(aliceCpk);
+        return;
+      }
+      dispatch({
+        t: 'restore',
+        payload: {
+          kind: 'waiting-deposit',
+          hashHex: pending.hashHex,
+          preimageHex: pending.preimageHex,
+          lockTxHash: pending.lockTxHash,
+          deadlineMs: BigInt(pending.deadlineMs),
+          adaAmount: BigInt(pending.adaAmount),
+          usdcAmount: BigInt(pending.usdcAmount),
+        },
+      });
+      setRestoreNotice(`Resumed pending swap ${pending.hashHex.slice(0, 12)}… — watching for Bob's deposit.`);
+    })();
+  }, [session]);
 
   const shareUrl = useMemo(() => {
     if (
@@ -237,6 +315,15 @@ export const AliceSwap: React.FC = () => {
       const lovelace = ada * 1_000_000n;
 
       const lockTxHash = await cardano.cardanoHtlc.lock(lovelace, hashHex, bobPkhHex, deadlineMs);
+
+      savePending(session.bootstrap.coinPublicKeyHex, {
+        hashHex,
+        preimageHex,
+        lockTxHash,
+        deadlineMs: deadlineMs.toString(),
+        adaAmount: ada.toString(),
+        usdcAmount: usdc.toString(),
+      });
 
       void tryOrchestrator(
         () =>
@@ -312,12 +399,20 @@ export const AliceSwap: React.FC = () => {
         () => orchestratorClient.patchSwap(state.hashHex, { status: 'alice_claimed' }),
         'patchSwap alice_claimed',
       );
+      clearPending(session.bootstrap.coinPublicKeyHex);
       dispatch({ t: 'to-done', depositAmount: state.depositAmount });
     } catch (e) {
       console.error('[AliceSwap:claim]', e);
       dispatch({ t: 'error', message: describeError(e) });
     }
   }, [state, session]);
+
+  const onForgetPending = useCallback(() => {
+    if (!session) return;
+    clearPending(session.bootstrap.coinPublicKeyHex);
+    setRestoreNotice(undefined);
+    dispatch({ t: 'to-params' });
+  }, [session]);
 
   const onCopy = useCallback(async () => {
     if (!shareUrl) return;
@@ -329,6 +424,15 @@ export const AliceSwap: React.FC = () => {
       <Typography variant="h4" sx={{ color: '#fff' }}>
         Alice — lock ADA, claim USDC
       </Typography>
+
+      {restoreNotice && (
+        <Alert severity="info">
+          {restoreNotice}{' '}
+          <Link component="button" underline="hover" onClick={onForgetPending} sx={{ ml: 1 }}>
+            Forget stored swap
+          </Link>
+        </Alert>
+      )}
 
       {state.kind === 'connect' && (
         <>
