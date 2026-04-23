@@ -253,13 +253,37 @@ export class CardanoHTLCBrowser {
 
     this.logger.info({ hashHex, amountLovelace: utxo.assets.lovelace }, 'CardanoHTLC: claim');
 
+    // `validTo` must satisfy:   current_slot < validTo < datum.deadline
+    // The Aiken validator checks `upper_bound < deadline` (strict).
+    // Too large a pre-deadline buffer kills tight-window claims (reverse flow
+    // uses shorter deadlines). Too small leaves no room for propagation. Push
+    // validTo as close to the deadline as we safely can, while staying at
+    // least 15s ahead of `now` for tx relay. Also reject up front if there's
+    // literally no window left — a better error than a node reject.
+    const nowMs = Date.now();
+    const deadlineMs = Number(datum.deadline);
+    const safetyGapMs = 10_000; // breathing room before the deadline
+    const minPropagationMs = 15_000; // minimum slack ahead of now for tx relay
+    const validToMs = deadlineMs - safetyGapMs;
+    if (validToMs <= nowMs + 5_000) {
+      throw new Error(
+        `Cardano deadline ${Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000))}s away — too close to safely submit a claim tx. Consider reclaim instead.`,
+      );
+    }
+    if (validToMs - nowMs < minPropagationMs) {
+      this.logger.warn(
+        { secsLeft: Math.ceil((deadlineMs - nowMs) / 1000) },
+        'CardanoHTLC: claim window is tight — submitting anyway',
+      );
+    }
+
     const redeemer = withdrawRedeemer(preimageHex);
     const tx = await this.lucid
       .newTx()
       .collectFrom([utxo], redeemer)
       .attach.SpendingValidator(this.validator)
       .addSigner(walletAddr)
-      .validTo(Number(datum.deadline) - 60_000)
+      .validTo(validToMs)
       .complete({ localUPLCEval: false });
 
     const signed = await tx.sign.withWallet().complete();

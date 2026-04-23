@@ -84,6 +84,7 @@ export const Reclaim: React.FC = () => {
   const [showManual, setShowManual] = useState(false);
 
   const myCpk = session?.bootstrap.coinPublicKeyHex?.toLowerCase();
+  const myPkh = cardano?.paymentKeyHash?.toLowerCase();
 
   const setRow = useCallback((hash: string, s: RowStatus): void => {
     setRowStatuses((prev) => {
@@ -119,21 +120,32 @@ export const Reclaim: React.FC = () => {
 
   const { adaReclaimable, usdcReclaimable } = useMemo(() => {
     if (!swaps) return { adaReclaimable: [] as Swap[], usdcReclaimable: [] as Swap[] };
-    const ada = swaps.filter(
-      (s) =>
-        (s.status === 'open' || s.status === 'bob_deposited') &&
-        s.cardanoDeadlineMs < nowMs &&
-        (!myCpk || s.aliceCpk.toLowerCase() === myCpk),
-    );
-    const usdc = swaps.filter(
-      (s) =>
-        s.status === 'bob_deposited' &&
-        s.midnightDeadlineMs !== null &&
-        s.midnightDeadlineMs < nowMs &&
-        (!myCpk || s.bobCpk?.toLowerCase() === myCpk),
-    );
+
+    // "ADA reclaimable" = you locked ADA on Cardano, the deadline passed, and
+    // the lock still exists on-chain.
+    //   ada-usdc: maker locks ADA (aliceCpk match identifies the user).
+    //   usdc-ada: taker locks ADA (bobPkh match identifies the user).
+    const ada = swaps.filter((s) => {
+      if (s.cardanoDeadlineMs === null || s.cardanoDeadlineMs >= nowMs) return false;
+      if (s.direction === 'ada-usdc') {
+        return (s.status === 'open' || s.status === 'bob_deposited') && (!myCpk || s.aliceCpk.toLowerCase() === myCpk);
+      }
+      return s.status === 'bob_deposited' && (!myPkh || s.bobPkh?.toLowerCase() === myPkh);
+    });
+
+    // "USDC reclaimable" = you deposited USDC on Midnight, the deadline passed,
+    // and the deposit still exists on-chain.
+    //   ada-usdc: taker deposited USDC (bobCpk match).
+    //   usdc-ada: maker deposited USDC (aliceCpk match).
+    const usdc = swaps.filter((s) => {
+      if (s.midnightDeadlineMs === null || s.midnightDeadlineMs >= nowMs) return false;
+      if (s.direction === 'ada-usdc') {
+        return s.status === 'bob_deposited' && (!myCpk || s.bobCpk?.toLowerCase() === myCpk);
+      }
+      return (s.status === 'open' || s.status === 'bob_deposited') && (!myCpk || s.aliceCpk.toLowerCase() === myCpk);
+    });
     return { adaReclaimable: ada, usdcReclaimable: usdc };
-  }, [swaps, nowMs, myCpk]);
+  }, [swaps, nowMs, myCpk, myPkh]);
 
   const reclaimAdaRow = useCallback(
     async (swap: Swap): Promise<void> => {
@@ -511,7 +523,7 @@ const ReclaimRow: React.FC<{
   disabledReason?: string;
 }> = ({ swap, rowStatus, side, onReclaim, disabled, disabledReason }) => {
   const theme = useTheme();
-  const deadlineMs = side === 'ada' ? swap.cardanoDeadlineMs : (swap.midnightDeadlineMs ?? 0);
+  const deadlineMs = (side === 'ada' ? swap.cardanoDeadlineMs : swap.midnightDeadlineMs) ?? 0;
 
   return (
     <Box

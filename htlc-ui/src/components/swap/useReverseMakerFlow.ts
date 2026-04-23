@@ -16,6 +16,7 @@ import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { bytesToHex, hexToBytes, userEither } from '../../api/key-encoding';
 import { watchForCardanoLock, type CardanoHTLCInfo } from '../../api/cardano-watcher';
+import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 
 export interface ReverseMakerLockParams {
   readonly adaAmount: bigint;
@@ -218,10 +219,22 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
     if (state.kind === 'deposited') dispatch({ t: 'to-waiting' });
   }, [state.kind]);
 
-  // Watch Cardano for the counterparty's lock bound to our own PKH.
+  // Watch Cardano for the counterparty's lock bound to our own PKH. We race
+  // Blockfrost (authoritative) against an orchestrator poll (fast-path) —
+  // whichever surfaces the lock first wins. Orchestrator is typically a few
+  // seconds ahead because its cardano-watcher is already polling in a hot loop.
   useEffect(() => {
     if (state.kind !== 'waiting-cardano' || !cardano) return;
     const controller = new AbortController();
+    let fired = false;
+
+    const finishBlockfrost = (htlcInfo: CardanoHTLCInfo): void => {
+      if (fired) return;
+      fired = true;
+      controller.abort();
+      dispatch({ t: 'cardano-seen', cardanoHtlc: htlcInfo });
+    };
+
     void (async () => {
       try {
         const htlcInfo = await watchForCardanoLock(
@@ -231,13 +244,40 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
           state.hashHex,
           controller.signal,
         );
-        dispatch({ t: 'cardano-seen', cardanoHtlc: htlcInfo });
+        finishBlockfrost(htlcInfo);
       } catch (e) {
         if (controller.signal.aborted) return;
         dispatch({ t: 'error', message: describeError(e) });
       }
     })();
-    return () => controller.abort();
+
+    const pollOrchestrator = async (): Promise<void> => {
+      if (fired) return;
+      const dbSwap = await orchestratorClient.getSwap(state.hashHex).catch(() => undefined);
+      if (!dbSwap || fired) return;
+      if (
+        (dbSwap.status === 'bob_deposited' || dbSwap.status === 'alice_claimed' || dbSwap.status === 'completed') &&
+        dbSwap.cardanoLockTx &&
+        dbSwap.cardanoDeadlineMs !== null
+      ) {
+        // Fabricate a CardanoHTLCInfo from the orchestrator fields. The maker
+        // already has everything they need to claim (hash + deadline + bound PKH).
+        finishBlockfrost({
+          hashHex: state.hashHex,
+          amountLovelace: BigInt(state.adaAmount) * 1_000_000n,
+          deadlineMs: BigInt(dbSwap.cardanoDeadlineMs),
+          senderPkh: dbSwap.bobPkh ?? '', // the taker's PKH — not strictly needed here
+          receiverPkh: cardano.paymentKeyHash,
+        });
+      }
+    };
+    void pollOrchestrator();
+    const pollTimer = setInterval(() => void pollOrchestrator(), 2000);
+
+    return () => {
+      controller.abort();
+      clearInterval(pollTimer);
+    };
   }, [state, cardano]);
 
   // Share URL — this is what the reverse maker gives to the taker.
@@ -280,7 +320,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
 
         const usdcColor = hexToBytes(swapState.usdcColor);
 
-        await session.htlcApi.deposit({
+        const depositTxHash = await session.htlcApi.deposit({
           color: usdcColor,
           amount: params.usdcAmount,
           hash: hashLock,
@@ -297,6 +337,28 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
           adaAmount: params.adaAmount.toString(),
           usdcAmount: params.usdcAmount.toString(),
         });
+
+        // Register the reverse swap with the orchestrator. bobPkh is the
+        // MAKER's own Cardano PKH — the receiver that the future taker lock
+        // will bind to. bobCpk/bobUnshielded are the TAKER's Midnight keys
+        // (known via the paste-bundle we just used as receiverAuth/payout).
+        void tryOrchestrator(
+          () =>
+            orchestratorClient.createSwap({
+              hash: hashHex,
+              direction: 'usdc-ada',
+              aliceCpk: session.bootstrap.coinPublicKeyHex,
+              aliceUnshielded: session.bootstrap.unshieldedAddressHex,
+              adaAmount: params.adaAmount.toString(),
+              usdcAmount: params.usdcAmount.toString(),
+              midnightDeadlineMs: Number(midnightDeadlineMs),
+              midnightDepositTx: depositTxHash,
+              bobCpk: bytesToHex(params.counterpartyCpkBytes),
+              bobUnshielded: bytesToHex(params.counterpartyUnshieldedBytes),
+              bobPkh: cardano.paymentKeyHash,
+            }),
+          'createSwap reverse',
+        );
 
         dispatch({
           t: 'deposited',
@@ -324,9 +386,19 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
     dispatch({ t: 'to-claiming' });
     try {
       // Claiming ADA on Cardano with the preimage reveals it via the
-      // transaction redeemer. The counterparty reads it via Blockfrost
-      // (cardano.cardanoHtlc.findClaimPreimage) and claims USDC on Midnight.
+      // transaction redeemer. PATCH the orchestrator so the taker's fast-path
+      // picks up the preimage instantly instead of polling Blockfrost redeemer
+      // endpoints for several seconds.
       const claimTxHash = await cardano.cardanoHtlc.claim(state.preimageHex);
+      void tryOrchestrator(
+        () =>
+          orchestratorClient.patchSwap(state.hashHex, {
+            status: 'alice_claimed',
+            cardanoClaimTx: claimTxHash,
+            midnightPreimage: state.preimageHex,
+          }),
+        'patchSwap reverse alice_claimed',
+      );
       clearPending(session.bootstrap.coinPublicKeyHex);
       dispatch({ t: 'to-done', claimTxHash });
     } catch (e) {

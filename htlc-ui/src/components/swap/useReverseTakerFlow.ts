@@ -16,6 +16,7 @@ import { useToast } from '../../hooks/useToast';
 import { watchForHTLCDeposit, type HTLCDepositInfo } from '../../api/midnight-watcher';
 import { bytesToHex, hexToBytes } from '../../api/key-encoding';
 import { limits } from '../../config/limits';
+import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 
 export interface ReverseURLInputs {
   readonly hashHex: string;
@@ -263,7 +264,10 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
           return;
         }
         const maxTakerDeadlineSecs = midnightDeadlineSecs - limits.bobSafetyBufferSecs;
-        const desiredTakerDeadlineSecs = nowSecs + limits.bobDeadlineMin * 60;
+        // Reverse flow's second-chain lock is on Cardano, not Midnight, so we
+        // need a deadline generous enough for the maker's Cardano claim tx to
+        // propagate before expiry. `reverseTakerDeadlineMin` defaults to 5m.
+        const desiredTakerDeadlineSecs = nowSecs + limits.reverseTakerDeadlineMin * 60;
         const takerDeadlineSecs = Math.min(desiredTakerDeadlineSecs, maxTakerDeadlineSecs);
         const takerTtlSecs = takerDeadlineSecs - nowSecs;
         if (takerTtlSecs < limits.bobMinDepositTtlSecs) {
@@ -287,7 +291,8 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
     return () => controller.abort();
   }, [state, session, cardano, swapState.usdcColor]);
 
-  // Lock ADA on Cardano bound to the maker's PKH.
+  // Lock ADA on Cardano bound to the maker's PKH. PATCH the orchestrator with
+  // `bob_deposited` so the maker's fast-path picks it up ahead of Blockfrost.
   useEffect(() => {
     if (state.kind !== 'locking' || !cardano) return;
     void (async () => {
@@ -299,6 +304,16 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
           state.url.makerPkh,
           state.takerDeadlineMs,
         );
+        void tryOrchestrator(
+          () =>
+            orchestratorClient.patchSwap(state.url.hashHex, {
+              status: 'bob_deposited',
+              cardanoLockTx: txHash,
+              cardanoDeadlineMs: Number(state.takerDeadlineMs),
+              bobPkh: cardano.paymentKeyHash,
+            }),
+          'patchSwap reverse bob_deposited',
+        );
         dispatch({ t: 'locked', lockTxHash: txHash });
       } catch (e) {
         const msg = describeError(e);
@@ -308,17 +323,28 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
     })();
   }, [state, cardano, toast]);
 
-  // Wait for the maker's Cardano claim, then extract the preimage via
-  // Blockfrost redeemer reading.
+  // Wait for the maker's Cardano claim. Race two sources:
+  //   (a) Blockfrost redeemer reading (authoritative, ~slow)
+  //   (b) Orchestrator fast-path — the maker patches `midnightPreimage`
+  //       the moment their claim tx finalizes, and the server-side
+  //       cardano-watcher also relays the preimage it read itself.
   useEffect(() => {
     if (state.kind !== 'waiting-preimage' || !cardano) return;
     const controller = new AbortController();
+    let fired = false;
+    const finish = (preimage: string): void => {
+      if (fired) return;
+      fired = true;
+      controller.abort();
+      dispatch({ t: 'preimage-seen', preimageHex: preimage });
+    };
+
     void (async () => {
       while (!controller.signal.aborted) {
         try {
           const preimage = await cardano.cardanoHtlc.findClaimPreimage(state.url.hashHex);
           if (preimage) {
-            dispatch({ t: 'preimage-seen', preimageHex: preimage });
+            finish(preimage);
             return;
           }
         } catch (e) {
@@ -327,7 +353,21 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
         await new Promise<void>((resolve) => setTimeout(resolve, 6_000));
       }
     })();
-    return () => controller.abort();
+
+    const pollOrchestrator = async (): Promise<void> => {
+      if (fired) return;
+      const dbSwap = await orchestratorClient.getSwap(state.url.hashHex).catch(() => undefined);
+      if (dbSwap?.midnightPreimage && /^[0-9a-f]{64}$/.test(dbSwap.midnightPreimage)) {
+        finish(dbSwap.midnightPreimage);
+      }
+    };
+    void pollOrchestrator();
+    const pollTimer = setInterval(() => void pollOrchestrator(), 2000);
+
+    return () => {
+      controller.abort();
+      clearInterval(pollTimer);
+    };
   }, [state, cardano]);
 
   const start = useCallback((url: ReverseURLInputs) => {
@@ -343,7 +383,15 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
     dispatch({ t: 'to-claiming' });
     try {
       const preimage = hexToBytes(state.preimageHex);
-      await session.htlcApi.withdrawWithPreimage(preimage);
+      const claimTxHash = await session.htlcApi.withdrawWithPreimage(preimage);
+      void tryOrchestrator(
+        () =>
+          orchestratorClient.patchSwap(state.url.hashHex, {
+            status: 'completed',
+            midnightClaimTx: claimTxHash,
+          }),
+        'patchSwap reverse completed',
+      );
       dispatch({ t: 'to-done' });
     } catch (e) {
       const msg = describeError(e);

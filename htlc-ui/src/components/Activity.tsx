@@ -108,12 +108,15 @@ export const Activity: React.FC = () => {
       } catch {
         /* ignore */
       }
-      const cardanoExpired = s.cardanoDeadlineMs < nowMs;
+      const cardanoExpired = s.cardanoDeadlineMs !== null && s.cardanoDeadlineMs < nowMs;
       const midnightExpired = s.midnightDeadlineMs !== null && s.midnightDeadlineMs < nowMs;
+      // "Stuck" here = past any of the relevant deadlines with no resolution.
+      // The specific deadline that matters depends on direction; a conservative
+      // OR across both flags is fine for a dashboard summary.
       const isStuck =
-        (s.status === 'open' && cardanoExpired) ||
+        (s.status === 'open' && (cardanoExpired || midnightExpired)) ||
         (s.status === 'bob_deposited' && (cardanoExpired || midnightExpired)) ||
-        (s.status === 'alice_claimed' && cardanoExpired);
+        (s.status === 'alice_claimed' && (cardanoExpired || midnightExpired));
       if (isStuck) stuck++;
     }
     return { total: swaps.length, byStatus, totalAda, totalUsdc, stuck };
@@ -239,15 +242,16 @@ export const Activity: React.FC = () => {
             overflowX: 'auto',
           }}
         >
-          <Table size="small" sx={{ minWidth: 900 }}>
+          <Table size="small" sx={{ minWidth: 1000 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Hash</TableCell>
+                <TableCell>Dir</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell align="right">ADA</TableCell>
                 <TableCell align="right">USDC</TableCell>
                 <TableCell>Age</TableCell>
-                <TableCell>Cardano deadline</TableCell>
+                <TableCell>Deadlines</TableCell>
                 <TableCell>Cardano lock</TableCell>
                 <TableCell>Cardano claim</TableCell>
                 <TableCell>Midnight deposit</TableCell>
@@ -263,20 +267,39 @@ export const Activity: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
+                    <Chip size="small" variant="outlined" label={s.direction === 'ada-usdc' ? 'A→U' : 'U→A'} />
+                  </TableCell>
+                  <TableCell>
                     <SwapStatusChip status={s.status} />
                   </TableCell>
                   <TableCell align="right">{s.adaAmount}</TableCell>
                   <TableCell align="right">{s.usdcAmount}</TableCell>
                   <TableCell>{formatAge(s.createdAt)}</TableCell>
                   <TableCell>
-                    <Typography variant="caption">
-                      {new Date(s.cardanoDeadlineMs).toLocaleString([], {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </Typography>
+                    <Stack spacing={0.25}>
+                      {s.cardanoDeadlineMs !== null && (
+                        <Typography variant="caption">
+                          C:{' '}
+                          {new Date(s.cardanoDeadlineMs).toLocaleString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Typography>
+                      )}
+                      {s.midnightDeadlineMs !== null && (
+                        <Typography variant="caption">
+                          M:{' '}
+                          {new Date(s.midnightDeadlineMs).toLocaleString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Typography>
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>{txLink('cardano', s.cardanoLockTx)}</TableCell>
                   <TableCell>{txLink('cardano', s.cardanoClaimTx ?? s.cardanoReclaimTx)}</TableCell>

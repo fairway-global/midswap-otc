@@ -1,14 +1,22 @@
 /**
- * Server-side Cardano chain watcher.
- *
- * Uses Blockfrost to observe the HTLC script address and advance swap
- * statuses when the Cardano lock UTxO is consumed (claimed or reclaimed).
+ * Server-side Cardano chain watcher — direction-aware.
  *
  * Transitions handled:
- *   alice_claimed           → completed         (Bob's Withdraw spent the lock)
- *   open | bob_deposited    → alice_reclaimed   (Alice's Reclaim spent the lock, post-deadline)
  *
- * We do NOT submit Cardano transactions — this module is read-only.
+ *   ada-usdc (forward):
+ *     alice_claimed        → completed        (taker Withdraw spent the maker's lock)
+ *     open | bob_deposited → alice_reclaimed  (maker Reclaim after deadline)
+ *
+ *   usdc-ada (reverse):
+ *     open                 → bob_deposited    (taker lock UTxO appears bound to makerPkh)
+ *     bob_deposited        → alice_claimed    (maker Withdraw spent the taker's lock)
+ *                                              — also extracts preimage from tx redeemer
+ *                                                and PATCHes `midnightPreimage` so the
+ *                                                reverse-taker's orchestrator fast-path
+ *                                                lights up before Blockfrost.
+ *     bob_deposited        → bob_reclaimed    (taker Reclaim after their own deadline)
+ *
+ * Read-only; no tx submission.
  */
 
 import {
@@ -18,6 +26,7 @@ import {
   type Network,
   type SpendingValidator,
 } from '@lucid-evolution/lucid';
+import { createHash } from 'node:crypto';
 import type { FastifyBaseLogger } from 'fastify';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -60,7 +69,13 @@ interface BlockfrostAddressTx {
 
 interface BlockfrostTxUtxos {
   hash: string;
-  inputs: Array<{ tx_hash: string; output_index: number }>;
+  inputs: Array<{ tx_hash: string; output_index: number; address?: string; inline_datum?: string | null }>;
+}
+
+interface BlockfrostRedeemer {
+  purpose: string;
+  redeemer_data_hash?: string;
+  script_hash?: string;
 }
 
 export interface CardanoWatcherConfig {
@@ -92,9 +107,7 @@ const loadEnvFromFile = (path: string): void => {
   }
 };
 
-export const resolveCardanoWatcherConfig = (
-  logger: FastifyBaseLogger,
-): CardanoWatcherConfig | null => {
+export const resolveCardanoWatcherConfig = (logger: FastifyBaseLogger): CardanoWatcherConfig | null => {
   loadEnvFromFile(resolve(process.cwd(), '..', 'htlc-ft-cli', '.env'));
   loadEnvFromFile(resolve(process.cwd(), '.env'));
 
@@ -130,10 +143,7 @@ export const resolveCardanoWatcherConfig = (
     }
   }
   if (!blueprintPath) {
-    logger.warn(
-      { candidates: candidatePaths },
-      'cardano-watcher disabled: cardano/plutus.json not found',
-    );
+    logger.warn({ candidates: candidatePaths }, 'cardano-watcher disabled: cardano/plutus.json not found');
     return null;
   }
 
@@ -143,8 +153,7 @@ export const resolveCardanoWatcherConfig = (
     blockfrostApiKey: apiKey,
     network: rawNetwork,
     blueprintPath,
-    pollIntervalMs:
-      Number.isFinite(pollIntervalMs) && pollIntervalMs >= 2000 ? pollIntervalMs : 8000,
+    pollIntervalMs: Number.isFinite(pollIntervalMs) && pollIntervalMs >= 2000 ? pollIntervalMs : 8000,
   };
 };
 
@@ -155,6 +164,12 @@ const loadValidator = (blueprintPath: string): SpendingValidator => {
   const v = blueprint.validators.find((x) => x.title === 'htlc.htlc.spend');
   if (!v) throw new Error('htlc.htlc.spend validator not found in blueprint');
   return { type: 'PlutusV3', script: v.compiledCode };
+};
+
+const sha256Hex = (hex: string): string => {
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  const bytes = Buffer.from(clean, 'hex');
+  return createHash('sha256').update(bytes).digest('hex');
 };
 
 export const startCardanoWatcher = (
@@ -172,10 +187,7 @@ export const startCardanoWatcher = (
       });
       if (res.status === 404) return null;
       if (!res.ok) {
-        logger.debug(
-          { status: res.status, path },
-          'cardano-watcher: Blockfrost non-OK (transient)',
-        );
+        logger.debug({ status: res.status, path }, 'cardano-watcher: Blockfrost non-OK (transient)');
         return null;
       }
       return (await res.json()) as T;
@@ -188,9 +200,7 @@ export const startCardanoWatcher = (
     }
   };
 
-  const findSpenderTxHash = async (
-    lockTxHash: string,
-  ): Promise<string | null> => {
+  const findSpenderTxHash = async (lockTxHash: string): Promise<string | null> => {
     const lockOutputs = await bfFetch<BlockfrostTxUtxos>(`/txs/${lockTxHash}/utxos`);
     if (!lockOutputs) return null;
     const addrTxs = await bfFetch<BlockfrostAddressTx[]>(
@@ -209,6 +219,32 @@ export const startCardanoWatcher = (
     return null;
   };
 
+  /**
+   * Given a tx that spent a script UTxO whose datum contained the target hash,
+   * extract the preimage from the Withdraw redeemer. Returns undefined if the
+   * tx wasn't a Withdraw or if decoding failed.
+   */
+  const extractPreimageFromClaimTx = async (spenderTxHash: string, targetHash: string): Promise<string | null> => {
+    const redeemers = await bfFetch<BlockfrostRedeemer[]>(`/txs/${spenderTxHash}/redeemers`);
+    if (!redeemers) return null;
+    const spendRedeemer = redeemers.find((r) => r.purpose === 'spend');
+    if (!spendRedeemer?.redeemer_data_hash) return null;
+
+    const datum = await bfFetch<{ cbor: string }>(`/scripts/datum/${spendRedeemer.redeemer_data_hash}/cbor`);
+    if (!datum) return null;
+
+    try {
+      const parsed = Data.from(datum.cbor) as Constr<string | bigint>;
+      if (Number(parsed.index) !== 0) return null; // not Withdraw
+      const preimageHex = parsed.fields[0];
+      if (typeof preimageHex !== 'string') return null;
+      if (sha256Hex(preimageHex) !== targetHash) return null;
+      return preimageHex;
+    } catch {
+      return null;
+    }
+  };
+
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
 
@@ -219,63 +255,143 @@ export const startCardanoWatcher = (
       ...store.list({ status: 'open' }),
       ...store.list({ status: 'bob_deposited' }),
       ...store.list({ status: 'alice_claimed' }),
-    ].filter((s) => s.cardanoLockTx);
-
+    ];
     if (watched.length === 0) return;
 
     const utxos = await bfFetch<BlockfrostUtxo[]>(`/addresses/${scriptAddress}/utxos`);
     if (!utxos) return;
 
-    const activeHashes = new Set<string>();
+    // Build a map of active HTLCs at the script address, keyed by hash.
+    const activeByHash = new Map<string, { tx_hash: string; output_index: number; datum: HTLCDatum; lovelace: bigint }>();
     for (const u of utxos) {
       if (!u.inline_datum) continue;
       const datum = decodeDatum(u.inline_datum);
-      if (datum) activeHashes.add(datum.preimageHash);
+      if (!datum) continue;
+      const lovelace = BigInt(u.amount.find((a) => a.unit === 'lovelace')?.quantity ?? '0');
+      activeByHash.set(datum.preimageHash, {
+        tx_hash: u.tx_hash,
+        output_index: u.output_index,
+        datum,
+        lovelace,
+      });
     }
 
     const now = Date.now();
 
     for (const swap of watched) {
       if (stopped) return;
-      if (activeHashes.has(swap.hash)) continue;
+      const active = activeByHash.get(swap.hash);
 
-      if (swap.status === 'alice_claimed') {
-        const spenderTx = await findSpenderTxHash(swap.cardanoLockTx);
-        const updated = store.patch(swap.hash, {
-          status: 'completed',
-          ...(spenderTx ? { cardanoClaimTx: spenderTx } : {}),
-        });
-        if (updated) {
-          logger.info(
-            { hash: swap.hash.slice(0, 16), claimTx: spenderTx?.slice(0, 16) ?? '(unknown)' },
-            'cardano-watcher: alice_claimed → completed (Bob claimed ADA on Cardano)',
-          );
+      try {
+        if (swap.direction === 'ada-usdc') {
+          // Forward flow. Cardano lock was made by the maker at creation.
+          if (!swap.cardanoLockTx) continue; // can't happen in practice but TS is strict
+          if (active) continue; // lock still unspent, nothing to do
+
+          if (swap.status === 'alice_claimed') {
+            const spenderTx = await findSpenderTxHash(swap.cardanoLockTx);
+            store.patch(swap.hash, {
+              status: 'completed',
+              ...(spenderTx ? { cardanoClaimTx: spenderTx } : {}),
+            });
+            logger.info(
+              { hash: swap.hash.slice(0, 16), claimTx: spenderTx?.slice(0, 16) ?? '(unknown)' },
+              'cardano-watcher: alice_claimed → completed (ada-usdc: taker claimed ADA)',
+            );
+            continue;
+          }
+
+          if (swap.status === 'open' || swap.status === 'bob_deposited') {
+            if (swap.cardanoDeadlineMs !== null && now < swap.cardanoDeadlineMs) {
+              logger.warn(
+                { hash: swap.hash.slice(0, 16), status: swap.status },
+                'cardano-watcher: lock UTxO vanished before deadline — possible anomaly',
+              );
+              continue;
+            }
+            const spenderTx = await findSpenderTxHash(swap.cardanoLockTx);
+            store.patch(swap.hash, {
+              status: 'alice_reclaimed',
+              ...(spenderTx ? { cardanoReclaimTx: spenderTx } : {}),
+            });
+            logger.info(
+              { hash: swap.hash.slice(0, 16), reclaimTx: spenderTx?.slice(0, 16) ?? '(unknown)' },
+              'cardano-watcher: → alice_reclaimed (ada-usdc: maker refunded ADA)',
+            );
+          }
+          continue;
         }
-        continue;
-      }
 
-      if (swap.status === 'open' || swap.status === 'bob_deposited') {
-        if (now < swap.cardanoDeadlineMs) {
-          logger.warn(
-            { hash: swap.hash.slice(0, 16), status: swap.status },
-            'cardano-watcher: lock UTxO vanished before deadline — possible anomaly',
+        // usdc-ada (reverse). Taker locks Cardano, maker claims Cardano to reveal preimage.
+        if (swap.status === 'open') {
+          if (!active) continue;
+          // Expect the taker's lock to be bound to the maker's own PKH (stored as bobPkh
+          // at creation for reverse). Verify before transitioning, to avoid matching
+          // stale UTxOs from other swaps at the shared script address.
+          if (swap.bobPkh && active.datum.receiver.toLowerCase() !== swap.bobPkh.toLowerCase()) continue;
+          store.patch(swap.hash, {
+            status: 'bob_deposited',
+            cardanoLockTx: active.tx_hash,
+            cardanoDeadlineMs: Number(active.datum.deadline),
+          });
+          logger.info(
+            { hash: swap.hash.slice(0, 16), lockTx: active.tx_hash.slice(0, 16) },
+            'cardano-watcher: open → bob_deposited (usdc-ada: taker locked ADA)',
           );
           continue;
         }
-        const spenderTx = await findSpenderTxHash(swap.cardanoLockTx);
-        const updated = store.patch(swap.hash, {
-          status: 'alice_reclaimed',
-          ...(spenderTx ? { cardanoReclaimTx: spenderTx } : {}),
-        });
-        if (updated) {
+
+        if (swap.status === 'bob_deposited' && swap.cardanoLockTx) {
+          if (active) continue; // still unspent
+
+          const spenderTx = await findSpenderTxHash(swap.cardanoLockTx);
+          if (!spenderTx) {
+            logger.debug(
+              { hash: swap.hash.slice(0, 16) },
+              'cardano-watcher: usdc-ada lock gone but spender not yet found (Blockfrost lag)',
+            );
+            continue;
+          }
+
+          // Try to extract the preimage from the spender's redeemer. If the
+          // maker claimed, it's a Withdraw(preimage) and we can relay the
+          // preimage to the taker via midnightPreimage. If it's Reclaim, we
+          // get null and route to bob_reclaimed.
+          const preimage = await extractPreimageFromClaimTx(spenderTx, swap.hash);
+
+          if (preimage) {
+            store.patch(swap.hash, {
+              status: 'alice_claimed',
+              cardanoClaimTx: spenderTx,
+              midnightPreimage: preimage,
+            });
+            logger.info(
+              { hash: swap.hash.slice(0, 16), claimTx: spenderTx.slice(0, 16) },
+              'cardano-watcher: bob_deposited → alice_claimed (usdc-ada: maker claimed ADA; preimage relayed)',
+            );
+            continue;
+          }
+
+          // No preimage in the spender → it was a Reclaim by the taker.
+          if (swap.cardanoDeadlineMs !== null && now < swap.cardanoDeadlineMs) {
+            logger.warn(
+              { hash: swap.hash.slice(0, 16) },
+              'cardano-watcher: usdc-ada lock spent before deadline without a Withdraw redeemer — anomaly',
+            );
+            continue;
+          }
+          store.patch(swap.hash, {
+            status: 'bob_reclaimed',
+            cardanoReclaimTx: spenderTx,
+          });
           logger.info(
-            {
-              hash: swap.hash.slice(0, 16),
-              reclaimTx: spenderTx?.slice(0, 16) ?? '(unknown)',
-            },
-            'cardano-watcher: open/bob_deposited → alice_reclaimed (ADA refunded to Alice)',
+            { hash: swap.hash.slice(0, 16), reclaimTx: spenderTx.slice(0, 16) },
+            'cardano-watcher: bob_deposited → bob_reclaimed (usdc-ada: taker refunded ADA)',
           );
+          continue;
         }
+      } catch (err) {
+        logger.warn({ err, hash: swap.hash.slice(0, 16) }, 'cardano-watcher: swap check failed');
       }
     }
   };
@@ -285,10 +401,7 @@ export const startCardanoWatcher = (
     timer = setTimeout(() => {
       void tick()
         .catch((err) => {
-          logger.warn(
-            { err: err instanceof Error ? err.message : err },
-            'cardano-watcher: tick failed',
-          );
+          logger.warn({ err: err instanceof Error ? err.message : err }, 'cardano-watcher: tick failed');
         })
         .finally(schedule);
     }, cfg.pollIntervalMs);
@@ -301,7 +414,7 @@ export const startCardanoWatcher = (
       blockfrost: cfg.blockfrostUrl,
       pollMs: cfg.pollIntervalMs,
     },
-    'cardano-watcher started',
+    'cardano-watcher started (bidirectional)',
   );
 
   schedule();

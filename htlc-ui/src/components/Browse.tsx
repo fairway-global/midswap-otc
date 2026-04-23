@@ -78,26 +78,44 @@ export const Browse: React.FC = () => {
 
   const { visible, ownCount } = useMemo(() => {
     if (!swaps) return { visible: undefined as Swap[] | undefined, ownCount: 0 };
+    // Hide the user's own offers (they manage these from the Swap page).
     const notMine = swaps.filter((s) => !myCpk || s.aliceCpk.toLowerCase() !== myCpk);
     const own = swaps.length - notMine.length;
     let list = notMine;
-    if (filter === 'mine' && myPkh) {
-      list = notMine.filter((s) => s.bobPkh?.toLowerCase() === myPkh);
+    if (filter === 'mine') {
+      list = notMine.filter((s) => {
+        // Direction-aware "targets your wallet" filter:
+        //   ada-usdc: Cardano lock is bound to the taker's PKH (bobPkh).
+        //   usdc-ada: Midnight deposit is bound to the taker's cpk (bobCpk).
+        if (s.direction === 'ada-usdc') return !!myPkh && s.bobPkh?.toLowerCase() === myPkh;
+        return !!myCpk && s.bobCpk?.toLowerCase() === myCpk;
+      });
     }
     return { visible: list, ownCount: own };
   }, [swaps, myCpk, myPkh, filter]);
 
   const onTake = useCallback(
     (swap: Swap) => {
-      const params = new URLSearchParams({
-        role: 'bob',
-        hash: swap.hash,
-        aliceCpk: swap.aliceCpk,
-        aliceUnshielded: swap.aliceUnshielded,
-        cardanoDeadlineMs: swap.cardanoDeadlineMs.toString(),
-        adaAmount: swap.adaAmount,
-        usdcAmount: swap.usdcAmount,
-      });
+      const params = new URLSearchParams();
+      params.set('hash', swap.hash);
+      params.set('adaAmount', swap.adaAmount);
+      params.set('usdcAmount', swap.usdcAmount);
+      if (swap.direction === 'ada-usdc') {
+        // Forward offer — existing URL shape.
+        params.set('role', 'bob');
+        params.set('aliceCpk', swap.aliceCpk);
+        params.set('aliceUnshielded', swap.aliceUnshielded);
+        if (swap.cardanoDeadlineMs !== null) {
+          params.set('cardanoDeadlineMs', swap.cardanoDeadlineMs.toString());
+        }
+      } else {
+        // Reverse offer — maker deposited USDC first; taker must lock ADA.
+        params.set('direction', 'usdc-ada');
+        if (swap.bobPkh) params.set('makerPkh', swap.bobPkh); // reverse: bobPkh = maker's own PKH
+        if (swap.midnightDeadlineMs !== null) {
+          params.set('midnightDeadlineMs', swap.midnightDeadlineMs.toString());
+        }
+      }
       void navigate(`/?${params.toString()}`);
     },
     [navigate],
@@ -202,23 +220,41 @@ export const Browse: React.FC = () => {
 
       <Stack spacing={1.5}>
         {visible?.map((swap) => (
-          <OfferCard key={swap.hash} swap={swap} myPkh={myPkh} onTake={onTake} />
+          <OfferCard key={swap.hash} swap={swap} myPkh={myPkh} myCpk={myCpk} onTake={onTake} />
         ))}
       </Stack>
     </Stack>
   );
 };
 
-const OfferCard: React.FC<{ swap: Swap; myPkh?: string; onTake: (s: Swap) => void }> = ({ swap, myPkh, onTake }) => {
+const OfferCard: React.FC<{
+  swap: Swap;
+  myPkh?: string;
+  myCpk?: string;
+  onTake: (s: Swap) => void;
+}> = ({ swap, myPkh, myCpk, onTake }) => {
   const theme = useTheme();
-  const remaining = swap.cardanoDeadlineMs - Date.now();
+
+  // The relevant deadline + wallet binding depend on direction.
+  //   ada-usdc: Cardano lock is bound to bobPkh; deadline is cardanoDeadlineMs.
+  //   usdc-ada: Midnight deposit is bound to bobCpk; deadline is midnightDeadlineMs.
+  const isForward = swap.direction === 'ada-usdc';
+  const deadlineMs = isForward ? swap.cardanoDeadlineMs : swap.midnightDeadlineMs;
+  const remaining = deadlineMs !== null ? deadlineMs - Date.now() : -1;
   const expired = remaining <= 0;
   const unsafe = !expired && remaining < limits.browseMinRemainingSecs * 1000;
-  const targetPkh = swap.bobPkh?.toLowerCase();
-  const missingPkh = !targetPkh;
-  const walletMismatch = !!(myPkh && targetPkh && myPkh !== targetPkh);
-  const walletMatches = !!(myPkh && targetPkh && myPkh === targetPkh);
+
+  const targetBinding = isForward ? swap.bobPkh?.toLowerCase() : swap.bobCpk?.toLowerCase();
+  const myBinding = isForward ? myPkh : myCpk;
+  const missingTarget = !targetBinding;
+  const walletMismatch = !!(myBinding && targetBinding && myBinding !== targetBinding);
+  const walletMatches = !!(myBinding && targetBinding && myBinding === targetBinding);
   const canTake = walletMatches && !expired && !unsafe;
+
+  const titleLabel = isForward
+    ? `${swap.adaAmount} ADA → ${swap.usdcAmount} USDC`
+    : `${swap.usdcAmount} USDC → ${swap.adaAmount} ADA`;
+  const directionLabel = isForward ? 'ADA→USDC' : 'USDC→ADA';
 
   return (
     <Box
@@ -233,22 +269,22 @@ const OfferCard: React.FC<{ swap: Swap; myPkh?: string; onTake: (s: Swap) => voi
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
           <Stack direction="row" spacing={-0.75}>
-            <TokenBadge token={ADA} size={34} />
+            <TokenBadge token={isForward ? ADA : USDC} size={34} />
             <Box sx={{ transform: 'translateX(-10px)' }}>
-              <TokenBadge token={USDC} size={34} />
+              <TokenBadge token={isForward ? USDC : ADA} size={34} />
             </Box>
           </Stack>
           <Stack>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Typography sx={{ fontWeight: 600 }}>
-                {swap.adaAmount} ADA → {swap.usdcAmount} USDC
-              </Typography>
+              <Typography sx={{ fontWeight: 600 }}>{titleLabel}</Typography>
+              <Chip size="small" label={directionLabel} variant="outlined" />
             </Stack>
             <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.25 }}>
               <AccessTimeIcon sx={{ fontSize: 13, color: theme.custom.textMuted }} />
               <Typography variant="caption" sx={{ color: theme.custom.textSecondary }}>
-                {expired ? 'expired' : formatRemaining(swap.cardanoDeadlineMs)} ·{' '}
-                {new Date(swap.cardanoDeadlineMs).toLocaleString()}
+                {deadlineMs === null
+                  ? 'no deadline yet'
+                  : `${expired ? 'expired' : formatRemaining(deadlineMs)} · ${new Date(deadlineMs).toLocaleString()}`}
               </Typography>
             </Stack>
           </Stack>
@@ -259,7 +295,7 @@ const OfferCard: React.FC<{ swap: Swap; myPkh?: string; onTake: (s: Swap) => voi
           {!expired && unsafe && <Chip size="small" color="warning" label="Too little time" />}
           {walletMatches && <Chip size="small" color="success" label="Your wallet" />}
           {walletMismatch && <Chip size="small" color="error" label="Different wallet" />}
-          {missingPkh && <Chip size="small" color="warning" label="Legacy — no PKH" />}
+          {missingTarget && <Chip size="small" color="warning" label="Legacy — no binding" />}
         </Stack>
 
         <Button
@@ -270,8 +306,10 @@ const OfferCard: React.FC<{ swap: Swap; myPkh?: string; onTake: (s: Swap) => voi
           sx={{ minWidth: 120 }}
         >
           <SwapHorizIcon fontSize="small" sx={{ mr: 0.75 }} />
-          {!myPkh
-            ? 'Connect to take'
+          {!myBinding
+            ? isForward
+              ? 'Connect Cardano'
+              : 'Connect Midnight'
             : walletMismatch
               ? 'Not you'
               : expired
@@ -284,13 +322,13 @@ const OfferCard: React.FC<{ swap: Swap; myPkh?: string; onTake: (s: Swap) => voi
 
       {walletMismatch && (
         <Alert severity="warning" sx={{ mt: 1.5 }}>
-          This offer is locked on-chain to a different Cardano wallet. Only that wallet can claim the ADA. Ask the maker
-          to re-post with your PKH.
+          This offer is locked on-chain to a different {isForward ? 'Cardano wallet' : 'Midnight shielded key'}. Only
+          that wallet can claim. Ask the maker to re-post with your {isForward ? 'PKH' : 'key bundle'}.
         </Alert>
       )}
-      {missingPkh && !walletMismatch && (
+      {missingTarget && !walletMismatch && (
         <Alert severity="info" sx={{ mt: 1.5 }}>
-          Legacy offer — no intended receiver PKH recorded. Use the maker&apos;s share URL instead.
+          Legacy offer — no intended receiver recorded. Use the maker&apos;s share URL instead.
         </Alert>
       )}
 

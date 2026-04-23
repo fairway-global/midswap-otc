@@ -28,6 +28,15 @@ export const limits = {
   bobSafetyBufferSecs: num('VITE_BOB_SAFETY_BUFFER_SECS', 60),
   /** Minutes Bob's Midnight deadline ideally lasts from now. */
   bobDeadlineMin: num('VITE_BOB_DEADLINE_MIN', 2),
+  /**
+   * Minutes the reverse-flow taker's Cardano deadline lasts from now.
+   *
+   * Default is 5 minutes — longer than forward's `bobDeadlineMin` because the
+   * reverse maker's claim must land on Cardano (slower finality + script tx
+   * propagation + validTo safety margin) before this expires, unlike forward
+   * where the maker's claim lands on fast-finality Midnight.
+   */
+  reverseTakerDeadlineMin: num('VITE_REVERSE_TAKER_DEADLINE_MIN', 5),
   /** Absolute floor (seconds) for Bob's deposit TTL after safety-buffer truncation. */
   bobMinDepositTtlSecs: num('VITE_BOB_MIN_DEPOSIT_TTL_SECS', 60),
   /** Browse hides offers whose deadline is within this many seconds. */

@@ -33,9 +33,9 @@ export interface DeployedHTLCAPI {
   readonly deployedContractAddress: ContractAddress;
   readonly state$: Observable<HTLCDerivedState>;
 
-  deposit(params: DepositParams): Promise<void>;
-  withdrawWithPreimage(preimage: Uint8Array): Promise<void>;
-  reclaimAfterExpiry(hash: Uint8Array): Promise<void>;
+  deposit(params: DepositParams): Promise<string>;
+  withdrawWithPreimage(preimage: Uint8Array): Promise<string>;
+  reclaimAfterExpiry(hash: Uint8Array): Promise<string>;
 }
 
 export interface DepositParams {
@@ -98,7 +98,7 @@ export class HtlcAPI implements DeployedHTLCAPI {
       .pipe(map((contractState: ContractState) => ledgerToDerivedState(HTLC.ledger(contractState.data))));
   }
 
-  async deposit(p: DepositParams): Promise<void> {
+  async deposit(p: DepositParams): Promise<string> {
     this.logger?.info({ amount: p.amount, hashHex: toHex(p.hash) }, 'htlc.deposit');
     const txData = await this.deployedContract.callTx.deposit(
       p.color,
@@ -116,9 +116,10 @@ export class HtlcAPI implements DeployedHTLCAPI {
         blockHeight: txData.public.blockHeight,
       },
     });
+    return txData.public.txHash;
   }
 
-  async withdrawWithPreimage(preimage: Uint8Array): Promise<void> {
+  async withdrawWithPreimage(preimage: Uint8Array): Promise<string> {
     this.logger?.info({ preimageLen: preimage.length }, 'htlc.withdrawWithPreimage');
     const txData = await this.deployedContract.callTx.withdrawWithPreimage(preimage);
     this.logger?.trace({
@@ -128,9 +129,10 @@ export class HtlcAPI implements DeployedHTLCAPI {
         blockHeight: txData.public.blockHeight,
       },
     });
+    return txData.public.txHash;
   }
 
-  async reclaimAfterExpiry(hash: Uint8Array): Promise<void> {
+  async reclaimAfterExpiry(hash: Uint8Array): Promise<string> {
     this.logger?.info({ hashHex: toHex(hash) }, 'htlc.reclaimAfterExpiry');
     const txData = await this.deployedContract.callTx.reclaimAfterExpiry(hash);
     this.logger?.trace({
@@ -140,6 +142,7 @@ export class HtlcAPI implements DeployedHTLCAPI {
         blockHeight: txData.public.blockHeight,
       },
     });
+    return txData.public.txHash;
   }
 
   static async join(providers: HTLCProviders, contractAddress: ContractAddress, logger?: Logger): Promise<HtlcAPI> {

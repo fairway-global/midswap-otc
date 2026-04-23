@@ -1,7 +1,9 @@
 /**
  * Unified status chip for orchestrator swap statuses.
- * One vocabulary, one palette — rendered consistently in Browse, Reclaim,
- * Dashboard, and the recovery banner.
+ *
+ * Labels are direction-neutral — the same state name has a matching semantic
+ * in both `ada-usdc` and `usdc-ada` flows (e.g. `alice_claimed` = "Preimage
+ * revealed" regardless of which chain did the revealing).
  */
 
 import React from 'react';
@@ -17,17 +19,29 @@ interface StatusMeta {
 }
 
 const META: Record<SwapStatus, StatusMeta> = {
-  open: { label: 'Open', color: 'info', description: 'Waiting for Bob to deposit' },
-  bob_deposited: { label: 'Bob deposited', color: 'primary', description: 'Waiting for Alice to claim' },
-  alice_claimed: {
-    label: 'Alice claimed',
+  open: { label: 'Open', color: 'info', description: 'Maker has locked — waiting for counterparty.' },
+  bob_deposited: {
+    label: 'Counterparty locked',
     color: 'primary',
-    description: 'Preimage revealed — waiting for Bob to claim ADA',
+    description: 'Both sides locked — waiting for the maker to claim.',
   },
-  completed: { label: 'Completed', color: 'success', description: 'Swap finished' },
-  alice_reclaimed: { label: 'Alice reclaimed', color: 'warning', description: 'Alice refunded her ADA' },
-  bob_reclaimed: { label: 'Bob reclaimed', color: 'warning', description: 'Bob refunded his USDC' },
-  expired: { label: 'Expired', color: 'error', description: 'Past deadline — needs manual reclaim' },
+  alice_claimed: {
+    label: 'Preimage revealed',
+    color: 'primary',
+    description: 'Maker claimed — preimage is public. Taker can now claim.',
+  },
+  completed: { label: 'Completed', color: 'success', description: 'Swap finished.' },
+  alice_reclaimed: {
+    label: 'Maker reclaimed',
+    color: 'warning',
+    description: 'Maker refunded their initial lock after the deadline passed.',
+  },
+  bob_reclaimed: {
+    label: 'Taker reclaimed',
+    color: 'warning',
+    description: 'Taker refunded their lock after the deadline passed.',
+  },
+  expired: { label: 'Expired', color: 'error', description: 'Past deadline — needs manual reclaim.' },
 };
 
 export const statusLabel = (s: SwapStatus): string => META[s].label;

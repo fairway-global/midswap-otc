@@ -1,15 +1,20 @@
 /**
- * Server-side Midnight chain watcher.
- *
- * Polls the HTLC contract's ledger state on an interval and advances swap
- * statuses in the orchestrator DB the moment on-chain evidence appears —
- * independently of whether Bob's or Alice's browser is still open.
+ * Server-side Midnight chain watcher — direction-aware.
  *
  * Transitions handled:
- *   open           → bob_deposited   when htlcAmounts[hash] > 0
- *   bob_deposited  → alice_claimed   when revealedPreimages[hash] is populated
  *
- * All state lives in the DB; this module does NOT submit transactions.
+ *   ada-usdc (forward):
+ *     open           → bob_deposited   when htlcAmounts[hash] > 0 (taker deposited)
+ *     bob_deposited  → alice_claimed   when revealedPreimages[hash] populated
+ *     bob_deposited  → bob_reclaimed   when amount=0 without preimage (taker refunded)
+ *
+ *   usdc-ada (reverse):
+ *     (swap enters DB already `open` with amount > 0 — maker deposited at creation)
+ *     bob_deposited  → completed       when amount=0 AND preimage revealed (taker claimed)
+ *     open|bob_dep.  → alice_reclaimed when amount=0 without preimage post-deadline (maker refunded)
+ *     — preimage reveal on Cardano is observed by the cardano-watcher, not here.
+ *
+ * This module does NOT submit transactions.
  */
 
 import { type ContractAddress } from '@midnight-ntwrk/compact-runtime';
@@ -129,10 +134,12 @@ export const startMidnightWatcher = (
   const tick = async (): Promise<void> => {
     if (stopped) return;
 
-    const openSwaps = store.list({ status: 'open' });
-    const depositedSwaps = store.list({ status: 'bob_deposited' });
+    const watched = [
+      ...store.list({ status: 'open' }),
+      ...store.list({ status: 'bob_deposited' }),
+    ];
 
-    if (openSwaps.length === 0 && depositedSwaps.length === 0) return;
+    if (watched.length === 0) return;
 
     let state;
     try {
@@ -157,59 +164,77 @@ export const startMidnightWatcher = (
       return;
     }
 
-    for (const swap of openSwaps) {
+    const now = Date.now();
+
+    for (const swap of watched) {
       if (stopped) return;
       try {
         const hashBytes = hexToBytes(swap.hash);
-        if (decoded.htlcAmounts.member(hashBytes) && decoded.htlcAmounts.lookup(hashBytes) > 0n) {
-          const updated = store.patch(swap.hash, { status: 'bob_deposited' });
-          if (updated) {
-            logger.info(
-              { hash: swap.hash.slice(0, 16) },
-              'midnight-watcher: open → bob_deposited (on-chain deposit observed)',
-            );
+        const hasEntry = decoded.htlcAmounts.member(hashBytes);
+        const amount = hasEntry ? decoded.htlcAmounts.lookup(hashBytes) : 0n;
+        const hasPreimage = decoded.revealedPreimages.member(hashBytes);
+
+        if (swap.direction === 'ada-usdc') {
+          // Forward flow. Taker deposits on Midnight, maker claims on Midnight.
+          if (swap.status === 'open') {
+            if (hasEntry && amount > 0n) {
+              store.patch(swap.hash, { status: 'bob_deposited' });
+              logger.info(
+                { hash: swap.hash.slice(0, 16) },
+                'midnight-watcher: open → bob_deposited (ada-usdc: taker deposit observed)',
+              );
+            }
+            continue;
           }
-        }
-      } catch (err) {
-        logger.warn({ err, hash: swap.hash.slice(0, 16) }, 'midnight-watcher: open-swap check failed');
-      }
-    }
-
-    for (const swap of depositedSwaps) {
-      if (stopped) return;
-      try {
-        const hashBytes = hexToBytes(swap.hash);
-
-        if (decoded.revealedPreimages.member(hashBytes)) {
-          if (swap.midnightPreimage) continue;
-          const preimage = decoded.revealedPreimages.lookup(hashBytes);
-          const preimageHex = bytesToHex(preimage);
-          const updated = store.patch(swap.hash, {
-            status: 'alice_claimed',
-            midnightPreimage: preimageHex,
-          });
-          if (updated) {
+          // bob_deposited
+          if (hasPreimage && !swap.midnightPreimage) {
+            const preimage = bytesToHex(decoded.revealedPreimages.lookup(hashBytes));
+            store.patch(swap.hash, { status: 'alice_claimed', midnightPreimage: preimage });
             logger.info(
               { hash: swap.hash.slice(0, 16) },
-              'midnight-watcher: bob_deposited → alice_claimed (preimage revealed on-chain)',
+              'midnight-watcher: bob_deposited → alice_claimed (ada-usdc: preimage revealed on Midnight)',
+            );
+            continue;
+          }
+          if (hasEntry && amount === 0n && !hasPreimage) {
+            store.patch(swap.hash, { status: 'bob_reclaimed' });
+            logger.info(
+              { hash: swap.hash.slice(0, 16) },
+              'midnight-watcher: bob_deposited → bob_reclaimed (ada-usdc: no preimage; taker refunded)',
             );
           }
           continue;
         }
 
-        const amountIsZero =
-          decoded.htlcAmounts.member(hashBytes) && decoded.htlcAmounts.lookup(hashBytes) === 0n;
-        if (amountIsZero) {
-          const updated = store.patch(swap.hash, { status: 'bob_reclaimed' });
-          if (updated) {
+        // usdc-ada (reverse). Maker deposited on Midnight at creation; the
+        // Cardano watcher drives bob_deposited (taker locked ADA) and
+        // alice_claimed (maker claimed ADA on Cardano, preimage in redeemer).
+        // Here we only care about:
+        //   1. taker's final Midnight claim (completed)
+        //   2. maker's Midnight reclaim post-deadline (alice_reclaimed)
+        if (hasEntry && amount === 0n) {
+          if (hasPreimage) {
+            // Taker claimed USDC on Midnight using the preimage learned from Cardano.
+            const preimage = bytesToHex(decoded.revealedPreimages.lookup(hashBytes));
+            store.patch(swap.hash, {
+              status: 'completed',
+              midnightPreimage: swap.midnightPreimage ?? preimage,
+            });
             logger.info(
               { hash: swap.hash.slice(0, 16) },
-              'midnight-watcher: bob_deposited → bob_reclaimed (no preimage reveal; Bob refunded)',
+              'midnight-watcher: → completed (usdc-ada: taker claimed USDC on Midnight)',
+            );
+          } else if (swap.midnightDeadlineMs !== null && now >= swap.midnightDeadlineMs) {
+            // Amount is zero with no preimage post-deadline — maker reclaimed.
+            store.patch(swap.hash, { status: 'alice_reclaimed' });
+            logger.info(
+              { hash: swap.hash.slice(0, 16) },
+              'midnight-watcher: → alice_reclaimed (usdc-ada: maker refunded USDC)',
             );
           }
         }
       } catch (err) {
-        logger.warn({ err, hash: swap.hash.slice(0, 16) }, 'midnight-watcher: deposited-swap check failed');
+        logger.warn({ err, hash: swap.hash.slice(0, 16) }, 'midnight-watcher: swap check failed');
       }
     }
   };
@@ -232,7 +257,7 @@ export const startMidnightWatcher = (
       contract: cfg.htlcContractAddress.slice(0, 16),
       pollMs: cfg.pollIntervalMs,
     },
-    'midnight-watcher started',
+    'midnight-watcher started (bidirectional)',
   );
 
   schedule();

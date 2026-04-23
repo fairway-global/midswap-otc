@@ -3,8 +3,11 @@
  *
  * The orchestrator is an ENHANCEMENT, not a dependency of the swap protocol —
  * all calls are best-effort and log rather than throw. Chain state remains
- * authoritative; the DB only exists so Bob can discover Alice's offers
- * without a copy-pasted URL.
+ * authoritative; the DB only exists so the counterparty can discover offers
+ * without a copy-pasted URL, and so cross-chain preimage relay lights up
+ * faster than the indexer/Blockfrost catch-up loops.
+ *
+ * Supports both flow directions via the `direction` field.
  */
 
 export type SwapStatus =
@@ -16,45 +19,72 @@ export type SwapStatus =
   | 'bob_reclaimed'
   | 'expired';
 
+export type FlowDirection = 'ada-usdc' | 'usdc-ada';
+
 export interface Swap {
   hash: string;
+  direction: FlowDirection;
+
   aliceCpk: string;
   aliceUnshielded: string;
   adaAmount: string;
   usdcAmount: string;
-  cardanoDeadlineMs: number;
-  cardanoLockTx: string;
-  bobCpk: string | null;
-  bobUnshielded: string | null;
+
+  cardanoDeadlineMs: number | null;
+  cardanoLockTx: string | null;
   bobPkh: string | null;
+
   midnightDeadlineMs: number | null;
   midnightDepositTx: string | null;
+  bobCpk: string | null;
+  bobUnshielded: string | null;
+
   midnightClaimTx: string | null;
   cardanoClaimTx: string | null;
   cardanoReclaimTx: string | null;
   midnightReclaimTx: string | null;
+
   midnightPreimage: string | null;
+
   status: SwapStatus;
   createdAt: number;
   updatedAt: number;
 }
 
+/**
+ * Create-swap body. `direction` defaults to `ada-usdc` server-side.
+ *
+ *   ada-usdc: send `cardanoLockTx`, `cardanoDeadlineMs`, `bobPkh` (taker's PKH).
+ *   usdc-ada: send `midnightDepositTx`, `midnightDeadlineMs`,
+ *             `bobCpk`, `bobUnshielded` (taker's keys from the paste-bundle),
+ *             `bobPkh` (maker's OWN Cardano PKH — the receiver the taker's
+ *             future ADA lock will bind to).
+ */
 export interface CreateSwapBody {
   hash: string;
+  direction?: FlowDirection;
+
   aliceCpk: string;
   aliceUnshielded: string;
   adaAmount: string;
   usdcAmount: string;
-  cardanoDeadlineMs: number;
-  cardanoLockTx: string;
-  /** PKH Alice set as the only valid receiver on-chain. Only a Bob with this Eternl PKH can claim. */
-  bobPkh: string;
+
+  cardanoDeadlineMs?: number;
+  cardanoLockTx?: string;
+  bobPkh?: string;
+
+  midnightDeadlineMs?: number;
+  midnightDepositTx?: string;
+  bobCpk?: string;
+  bobUnshielded?: string;
 }
 
 export interface PatchSwapBody {
   bobCpk?: string;
   bobUnshielded?: string;
   bobPkh?: string;
+  cardanoDeadlineMs?: number;
+  cardanoLockTx?: string;
   midnightDeadlineMs?: number;
   midnightDepositTx?: string;
   midnightClaimTx?: string;
@@ -90,6 +120,11 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
   return (await res.json()) as T;
 };
 
+export interface ListSwapsFilter {
+  status?: SwapStatus;
+  direction?: FlowDirection;
+}
+
 export const orchestratorClient = {
   baseUrl: BASE_URL,
 
@@ -97,9 +132,16 @@ export const orchestratorClient = {
 
   createSwap: (body: CreateSwapBody) => request<Swap>('/api/swaps', { method: 'POST', body: JSON.stringify(body) }),
 
-  listSwaps: (status?: SwapStatus) => {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-    return request<{ swaps: Swap[] }>(`/api/swaps${qs}`);
+  listSwaps: (filter?: SwapStatus | ListSwapsFilter) => {
+    const params = new URLSearchParams();
+    if (typeof filter === 'string') {
+      params.set('status', filter);
+    } else if (filter) {
+      if (filter.status) params.set('status', filter.status);
+      if (filter.direction) params.set('direction', filter.direction);
+    }
+    const qs = params.toString();
+    return request<{ swaps: Swap[] }>(`/api/swaps${qs ? `?${qs}` : ''}`);
   },
 
   getSwap: (hash: string) => request<Swap>(`/api/swaps/${hash}`),

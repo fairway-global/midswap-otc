@@ -34,6 +34,7 @@ import {
 import SettingsIcon from '@mui/icons-material/Settings';
 import SwapVertIcon from '@mui/icons-material/SwapVert';
 import CallMadeIcon from '@mui/icons-material/CallMade';
+import ContentPasteIcon from '@mui/icons-material/ContentPaste';
 import { alpha, useTheme } from '@mui/material/styles';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getAddressDetails } from '@lucid-evolution/lucid';
@@ -50,6 +51,7 @@ import { useToast } from '../../hooks/useToast';
 import { limits } from '../../config/limits';
 import { AsyncButton } from '../AsyncButton';
 import { decodeShieldedCoinPublicKey, decodeUnshieldedAddress } from '../../api/key-encoding';
+import { parseKeyBundle } from './keyBundle';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -405,6 +407,52 @@ export const SwapCard: React.FC = () => {
     onStartOver();
   }, [flowDirection, fwdMaker, revMaker, onStartOver]);
 
+  // Smart-paste: accept a `cpk:unshielded` bundle typed/pasted into either
+  // counterparty field, and split it into both fields transparently.
+  const applyMidnightKeys = useCallback((cpk: string, unshielded: string): void => {
+    setCounterpartyMidnightCpk(cpk);
+    setCounterpartyMidnightUnshielded(unshielded);
+  }, []);
+
+  const onCpkInputChange = useCallback(
+    (value: string): void => {
+      const bundle = parseKeyBundle(value);
+      if (bundle) {
+        applyMidnightKeys(bundle.cpk, bundle.unshielded);
+        return;
+      }
+      setCounterpartyMidnightCpk(value);
+    },
+    [applyMidnightKeys],
+  );
+
+  const onUnshieldedInputChange = useCallback(
+    (value: string): void => {
+      const bundle = parseKeyBundle(value);
+      if (bundle) {
+        applyMidnightKeys(bundle.cpk, bundle.unshielded);
+        return;
+      }
+      setCounterpartyMidnightUnshielded(value);
+    },
+    [applyMidnightKeys],
+  );
+
+  const onPasteBundle = useCallback(async (): Promise<void> => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const bundle = parseKeyBundle(text);
+      if (!bundle) {
+        toast.error("Clipboard doesn't contain a key bundle. Expected `cpk:unshielded`.");
+        return;
+      }
+      applyMidnightKeys(bundle.cpk, bundle.unshielded);
+      toast.success('Key bundle pasted into both fields.');
+    } catch (e) {
+      toast.error(`Clipboard read failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [applyMidnightKeys, toast]);
+
   return (
     <>
       <Box
@@ -521,17 +569,40 @@ export const SwapCard: React.FC = () => {
 
         {role === 'maker' && flowDirection === 'usdc-ada' && (
           <Stack spacing={1.25} sx={{ mt: 2 }}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{
+                p: 1,
+                borderRadius: 2,
+                border: `1px dashed ${theme.custom.borderSubtle}`,
+                bgcolor: alpha(theme.custom.cardanoBlue, 0.04),
+              }}
+            >
+              <Typography variant="caption" sx={{ color: theme.custom.textSecondary, flex: 1 }}>
+                Got a key bundle from the counterparty? Paste once to fill both fields.
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ContentPasteIcon fontSize="small" />}
+                onClick={() => void onPasteBundle()}
+              >
+                Paste bundle
+              </Button>
+            </Stack>
             <TextField
               size="small"
               fullWidth
               label="Counterparty Midnight shielded coin key"
               value={counterpartyMidnightCpk}
-              onChange={(e) => setCounterpartyMidnightCpk(e.target.value)}
-              placeholder="mn_shield-cpk_… or 64-hex"
+              onChange={(e) => onCpkInputChange(e.target.value)}
+              placeholder="mn_shield-cpk_… or bundle cpk:unshielded"
               error={counterpartyMidnightCpk.trim().length > 0 && !resolvedCounterpartyMidnightCpkBytes}
               helperText={
                 counterpartyMidnightCpk.trim().length === 0
-                  ? 'Bind the USDC deposit to their Midnight wallet — only they can claim.'
+                  ? 'Paste either the coin key alone, or the full cpk:unshielded bundle here.'
                   : resolvedCounterpartyMidnightCpkBytes
                     ? 'Valid shielded coin key.'
                     : 'Not a valid bech32m coin key or 64-hex.'
@@ -542,7 +613,7 @@ export const SwapCard: React.FC = () => {
               fullWidth
               label="Counterparty Midnight unshielded address"
               value={counterpartyMidnightUnshielded}
-              onChange={(e) => setCounterpartyMidnightUnshielded(e.target.value)}
+              onChange={(e) => onUnshieldedInputChange(e.target.value)}
               placeholder="mn_addr_… or 64-hex"
               error={counterpartyMidnightUnshielded.trim().length > 0 && !resolvedCounterpartyMidnightUnshieldedBytes}
               helperText={

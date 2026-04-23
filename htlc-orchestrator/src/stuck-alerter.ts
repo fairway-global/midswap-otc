@@ -71,21 +71,28 @@ export const resolveStuckAlerterConfig = (
   };
 };
 
-const classify = (
-  swap: Swap,
-  now: number,
-  aliceClaimedStaleMs: number,
-): StuckReason | null => {
-  const cardanoExpired = swap.cardanoDeadlineMs <= now;
-  const midnightExpired =
-    swap.midnightDeadlineMs !== null && swap.midnightDeadlineMs <= now;
+const classify = (swap: Swap, now: number, aliceClaimedStaleMs: number): StuckReason | null => {
+  const cardanoExpired = swap.cardanoDeadlineMs !== null && swap.cardanoDeadlineMs <= now;
+  const midnightExpired = swap.midnightDeadlineMs !== null && swap.midnightDeadlineMs <= now;
 
-  if (swap.status === 'bob_deposited' && midnightExpired) {
-    return 'bob_reclaim_available';
-  }
+  // Direction-aware: whose refund matters when changes depending on who locked
+  // which chain.
+  //
+  //   ada-usdc: maker locked Cardano (alice_reclaim on cardanoExpired);
+  //             taker deposited Midnight (bob_reclaim on midnightExpired).
+  //   usdc-ada: maker deposited Midnight (alice_reclaim on midnightExpired);
+  //             taker locked Cardano (bob_reclaim on cardanoExpired).
 
-  if ((swap.status === 'open' || swap.status === 'bob_deposited') && cardanoExpired) {
-    return 'alice_reclaim_available';
+  if (swap.direction === 'ada-usdc') {
+    if (swap.status === 'bob_deposited' && midnightExpired) return 'bob_reclaim_available';
+    if ((swap.status === 'open' || swap.status === 'bob_deposited') && cardanoExpired) {
+      return 'alice_reclaim_available';
+    }
+  } else {
+    if (swap.status === 'bob_deposited' && cardanoExpired) return 'bob_reclaim_available';
+    if ((swap.status === 'open' || swap.status === 'bob_deposited') && midnightExpired) {
+      return 'alice_reclaim_available';
+    }
   }
 
   if (swap.status === 'alice_claimed') {
@@ -124,7 +131,7 @@ interface AlertPayload {
   amountSummary: string;
   adaAmount: string;
   usdcAmount: string;
-  cardanoDeadlineMs: number;
+  cardanoDeadlineMs: number | null;
   midnightDeadlineMs: number | null;
   updatedAt: number;
   createdAt: number;
@@ -169,8 +176,10 @@ const formatMessageLine = (payload: AlertPayload): string => {
     `⚠ Stuck swap \`${payload.shortHash}…\` (${payload.status})`,
     `${payload.reasonLabel}`,
     `${payload.amountSummary}`,
-    `Cardano deadline: ${new Date(payload.cardanoDeadlineMs).toISOString()}`,
   ];
+  if (payload.cardanoDeadlineMs) {
+    lines.push(`Cardano deadline: ${new Date(payload.cardanoDeadlineMs).toISOString()}`);
+  }
   if (payload.midnightDeadlineMs) {
     lines.push(`Midnight deadline: ${new Date(payload.midnightDeadlineMs).toISOString()}`);
   }

@@ -52,18 +52,32 @@ export const RecoveryBanner: React.FC = () => {
   const { adaCount, usdcCount } = useMemo(() => {
     let ada = 0;
     let usdc = 0;
+    const isCpkMine = (c: string | null | undefined): boolean => !!myCpk && c?.toLowerCase() === myCpk;
+    const isPkhMine = (p: string | null | undefined): boolean => !!myPkh && p?.toLowerCase() === myPkh;
+    const cardanoExpired = (s: Swap): boolean => s.cardanoDeadlineMs !== null && s.cardanoDeadlineMs < nowMs;
+    const midnightExpired = (s: Swap): boolean => s.midnightDeadlineMs !== null && s.midnightDeadlineMs < nowMs;
+
     for (const s of swaps) {
-      const iAmAlice = myCpk && s.aliceCpk.toLowerCase() === myCpk;
-      const iAmBob = myCpk && s.bobCpk?.toLowerCase() === myCpk;
-      if (iAmAlice && (s.status === 'open' || s.status === 'bob_deposited') && s.cardanoDeadlineMs < nowMs) {
-        ada++;
-      }
-      if (iAmBob && s.status === 'bob_deposited' && s.midnightDeadlineMs !== null && s.midnightDeadlineMs < nowMs) {
-        usdc++;
+      if (s.direction === 'ada-usdc') {
+        // forward: maker locks ADA (aliceCpk); taker deposits USDC (bobCpk).
+        if (isCpkMine(s.aliceCpk) && (s.status === 'open' || s.status === 'bob_deposited') && cardanoExpired(s)) {
+          ada++;
+        }
+        if (isCpkMine(s.bobCpk) && s.status === 'bob_deposited' && midnightExpired(s)) {
+          usdc++;
+        }
+      } else {
+        // reverse: maker deposits USDC (aliceCpk); taker locks ADA (bobPkh).
+        if (isCpkMine(s.aliceCpk) && (s.status === 'open' || s.status === 'bob_deposited') && midnightExpired(s)) {
+          usdc++;
+        }
+        if (isPkhMine(s.bobPkh) && s.status === 'bob_deposited' && cardanoExpired(s)) {
+          ada++;
+        }
       }
     }
     return { adaCount: ada, usdcCount: usdc };
-  }, [swaps, nowMs, myCpk]);
+  }, [swaps, nowMs, myCpk, myPkh]);
 
   const total = adaCount + usdcCount;
   if (total === 0) return null;

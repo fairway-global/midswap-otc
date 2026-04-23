@@ -1,30 +1,42 @@
+-- Fresh-install schema. Indexes and any additive column migrations live in
+-- `db.ts` so that loading an older database (pre-direction column) works —
+-- we add missing columns before trying to index them.
+
 CREATE TABLE IF NOT EXISTS swaps (
   hash                  TEXT PRIMARY KEY,
 
-  -- Alice's offer (set on POST /swaps)
+  -- Flow direction — set at creation, never changes.
+  --   'ada-usdc' — maker locks ADA on Cardano first, taker deposits USDC on Midnight
+  --   'usdc-ada' — maker deposits USDC on Midnight first, taker locks ADA on Cardano
+  direction             TEXT NOT NULL DEFAULT 'ada-usdc'
+                          CHECK (direction IN ('ada-usdc', 'usdc-ada')),
+
+  -- Maker's Midnight credentials (always set at creation, regardless of direction).
   alice_cpk             TEXT NOT NULL,
   alice_unshielded      TEXT NOT NULL,
   ada_amount            TEXT NOT NULL,
   usdc_amount           TEXT NOT NULL,
-  cardano_deadline_ms   INTEGER NOT NULL,
-  cardano_lock_tx       TEXT NOT NULL,
 
-  -- Bob's acceptance (set when Bob deposits)
-  bob_cpk               TEXT,
-  bob_unshielded        TEXT,
+  -- Cardano side. See field-semantics table in CLAUDE.md / contract.md.
+  cardano_deadline_ms   INTEGER,
+  cardano_lock_tx       TEXT,
   bob_pkh               TEXT,
+
+  -- Midnight side.
   midnight_deadline_ms  INTEGER,
   midnight_deposit_tx   TEXT,
+  bob_cpk               TEXT,
+  bob_unshielded        TEXT,
 
-  -- Claim / reclaim receipts (set by watchers)
+  -- Claim / reclaim receipts (set by watchers).
   midnight_claim_tx     TEXT,
   cardano_claim_tx      TEXT,
   cardano_reclaim_tx    TEXT,
   midnight_reclaim_tx   TEXT,
 
-  -- Preimage Alice reveals on Midnight claim. Safe to publish because it is
-  -- already public in `revealedPreimages` at the same moment Alice patches
-  -- `status='alice_claimed'`. Lets Bob skip the Midnight indexer catch-up wait.
+  -- Preimage. Populated by whichever chain's claim reveals it first:
+  --   ada-usdc → revealed on Midnight via `revealedPreimages`
+  --   usdc-ada → revealed on Cardano via the claim tx redeemer
   midnight_preimage     TEXT,
 
   status                TEXT NOT NULL CHECK (status IN (
@@ -40,7 +52,3 @@ CREATE TABLE IF NOT EXISTS swaps (
   created_at            INTEGER NOT NULL,
   updated_at            INTEGER NOT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_swaps_status     ON swaps(status);
-CREATE INDEX IF NOT EXISTS idx_swaps_alice_cpk  ON swaps(alice_cpk);
-CREATE INDEX IF NOT EXISTS idx_swaps_bob_cpk    ON swaps(bob_cpk);

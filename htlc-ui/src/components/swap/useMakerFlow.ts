@@ -286,6 +286,7 @@ export const useMakerFlow = (): UseMakerFlow => {
           () =>
             orchestratorClient.createSwap({
               hash: hashHex,
+              direction: 'ada-usdc',
               aliceCpk: session.bootstrap.coinPublicKeyHex,
               aliceUnshielded: session.bootstrap.unshieldedAddressHex,
               adaAmount: params.adaAmount.toString(),

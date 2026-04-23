@@ -10,9 +10,11 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import LinkIcon from '@mui/icons-material/Link';
+import ShareIcon from '@mui/icons-material/IosShare';
 import { alpha, useTheme } from '@mui/material/styles';
 import { useSwapContext } from '../hooks';
 import { useToast } from '../hooks/useToast';
+import { formatKeyBundle } from './swap/keyBundle';
 
 const formatAda = (lovelace: bigint): string => {
   const whole = lovelace / 1_000_000n;
@@ -162,7 +164,7 @@ export const WalletMenu: React.FC = () => {
             )}
           </Stack>
           {session && (
-            <Stack spacing={0.5} sx={{ mt: 1 }}>
+            <Stack spacing={0.75} sx={{ mt: 1 }}>
               <AddressRow
                 label="Coin key"
                 value={session.bootstrap.coinPublicKeyHex}
@@ -173,6 +175,23 @@ export const WalletMenu: React.FC = () => {
                 value={session.bootstrap.unshieldedAddressHex}
                 onCopy={() => copy(session.bootstrap.unshieldedAddressHex, 'Unshielded address')}
               />
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<ShareIcon fontSize="small" />}
+                onClick={() =>
+                  void copy(
+                    formatKeyBundle(session.bootstrap.coinPublicKeyBech32m, session.bootstrap.unshieldedAddressBech32m),
+                    'Midnight key bundle',
+                  )
+                }
+                sx={{ alignSelf: 'flex-start', mt: 0.5 }}
+              >
+                Copy both (bundle)
+              </Button>
+              <Typography variant="caption" sx={{ color: theme.custom.textMuted, fontSize: '0.68rem' }}>
+                Paste this bundle into a counterparty&apos;s Midswap to bind a USDC→ADA offer to you.
+              </Typography>
             </Stack>
           )}
         </Box>
