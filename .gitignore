@@ -1,6 +1,7 @@
 # Claude Code session state
 .claude/
-
+ui/
+ui
 # Node.js
 node_modules/
 dist/

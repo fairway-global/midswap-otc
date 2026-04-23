@@ -22,7 +22,6 @@ import {
   Alert,
   Box,
   Button,
-  Divider,
   IconButton,
   InputAdornment,
   Link,
@@ -453,221 +452,294 @@ export const SwapCard: React.FC = () => {
     }
   }, [applyMidnightKeys, toast]);
 
+  const directionBadge =
+    role === 'maker'
+      ? flowDirection === 'ada-usdc'
+        ? 'ADA → USDC'
+        : 'USDC → ADA'
+      : flowDirection === 'ada-usdc'
+        ? 'Take ADA → USDC'
+        : 'Take USDC → ADA';
+
   return (
     <>
       <Box
         sx={{
           width: '100%',
-          maxWidth: 480,
+          maxWidth: 640,
           mx: 'auto',
-          p: 2.5,
-          borderRadius: 4,
+          borderRadius: 2,
           bgcolor: theme.custom.surface1,
           border: `1px solid ${theme.custom.borderSubtle}`,
-          boxShadow: `0 30px 80px -30px ${alpha('#000', 0.7)}, 0 0 0 1px ${theme.custom.borderSubtle}`,
-          backdropFilter: 'blur(18px)',
+          overflow: 'hidden',
         }}
       >
-        {/* Header */}
-        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-          <Typography sx={{ fontWeight: 600, fontSize: '1.05rem' }}>Swap</Typography>
-          <Typography variant="caption" sx={{ color: theme.custom.textMuted }}>
-            {role === 'maker'
-              ? flowDirection === 'ada-usdc'
-                ? 'ADA → USDC offer'
-                : 'USDC → ADA offer'
-              : `Take ${flowDirection === 'ada-usdc' ? 'ADA→USDC' : 'USDC→ADA'} offer`}
+        {/* Panel header — ContraClear style */}
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
+          sx={{
+            px: 2,
+            py: 1.5,
+            borderBottom: `1px solid ${theme.custom.borderSubtle}`,
+          }}
+        >
+          <Typography
+            sx={{
+              fontSize: '0.68rem',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              color: theme.custom.textMuted,
+            }}
+          >
+            {role === 'maker' ? 'Create OTC Offer' : 'Accept OTC Offer'}
           </Typography>
+          <Box
+            sx={{
+              borderRadius: 1,
+              border: `1px solid ${alpha(theme.custom.cardanoBlue, 0.3)}`,
+              bgcolor: alpha(theme.custom.cardanoBlue, 0.1),
+              px: 1,
+              py: 0.25,
+            }}
+          >
+            <Typography
+              sx={{
+                fontSize: '0.6rem',
+                fontWeight: 500,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: theme.custom.cardanoBlue,
+              }}
+            >
+              {directionBadge}
+            </Typography>
+          </Box>
           <Box sx={{ flex: 1 }} />
           <Tooltip title="Settings">
             <IconButton size="small" onClick={() => setSettingsOpen(true)} aria-label="Settings">
-              <SettingsIcon fontSize="small" />
+              <SettingsIcon sx={{ fontSize: 16 }} />
             </IconButton>
           </Tooltip>
         </Stack>
 
-        {/* Pay / Receive rows */}
-        <Box sx={{ position: 'relative' }}>
-          <Stack spacing={0.5}>
-            <TokenRow
-              label="You pay"
-              value={role === 'maker' ? (flowDirection === 'ada-usdc' ? adaAmount : usdcAmount) : takerPayValue}
-              onChange={role === 'maker' ? (flowDirection === 'ada-usdc' ? setAdaAmount : setUsdcAmount) : undefined}
-              token={pair.pay}
-              readOnly={role === 'taker'}
-              helper={payRowHelper(role, flowDirection)}
-              autoFocus={role === 'maker'}
-            />
-            <TokenRow
-              label="You receive"
-              value={role === 'maker' ? (flowDirection === 'ada-usdc' ? usdcAmount : adaAmount) : takerReceiveValue}
-              onChange={role === 'maker' ? (flowDirection === 'ada-usdc' ? setUsdcAmount : setAdaAmount) : undefined}
-              token={pair.receive}
-              readOnly={role === 'taker'}
-              helper={receiveRowHelper(role, flowDirection)}
-            />
-          </Stack>
+        {/* Card body */}
+        <Box sx={{ p: 2.5 }}>
+          {/* Pay / Receive rows */}
+          <Box sx={{ position: 'relative' }}>
+            <Stack spacing={0.5}>
+              <TokenRow
+                label="You pay"
+                value={role === 'maker' ? (flowDirection === 'ada-usdc' ? adaAmount : usdcAmount) : takerPayValue}
+                onChange={role === 'maker' ? (flowDirection === 'ada-usdc' ? setAdaAmount : setUsdcAmount) : undefined}
+                token={pair.pay}
+                readOnly={role === 'taker'}
+                helper={payRowHelper(role, flowDirection)}
+                autoFocus={role === 'maker'}
+              />
+              <TokenRow
+                label="You receive"
+                value={role === 'maker' ? (flowDirection === 'ada-usdc' ? usdcAmount : adaAmount) : takerReceiveValue}
+                onChange={role === 'maker' ? (flowDirection === 'ada-usdc' ? setUsdcAmount : setAdaAmount) : undefined}
+                token={pair.receive}
+                readOnly={role === 'taker'}
+                helper={receiveRowHelper(role, flowDirection)}
+              />
+            </Stack>
 
-          <Tooltip
-            title={
-              role === 'taker'
-                ? 'Flipping will discard the offer URL'
-                : flowDirection === 'ada-usdc'
-                  ? 'Flip to USDC → ADA (offer USDC for ADA)'
-                  : 'Flip to ADA → USDC (offer ADA for USDC)'
-            }
-          >
-            <IconButton
-              onClick={onFlip}
-              aria-label="Flip direction"
-              sx={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                zIndex: 2,
-                width: 42,
-                height: 42,
-                bgcolor: theme.custom.surface2,
-                border: `4px solid ${theme.custom.surface1}`,
-                '&:hover': { bgcolor: theme.custom.surface3 },
-              }}
+            <Tooltip
+              title={
+                role === 'taker'
+                  ? 'Flipping will discard the offer URL'
+                  : flowDirection === 'ada-usdc'
+                    ? 'Flip to USDC → ADA (offer USDC for ADA)'
+                    : 'Flip to ADA → USDC (offer ADA for USDC)'
+              }
             >
-              <SwapVertIcon fontSize="small" sx={{ color: theme.custom.textPrimary }} />
-            </IconButton>
-          </Tooltip>
+              <IconButton
+                onClick={onFlip}
+                aria-label="Flip direction"
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 2,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 1,
+                  bgcolor: theme.custom.surface2,
+                  border: `3px solid ${theme.custom.surface1}`,
+                  '&:hover': { bgcolor: theme.custom.surface3 },
+                }}
+              >
+                <SwapVertIcon sx={{ fontSize: 16, color: theme.custom.textPrimary }} />
+              </IconButton>
+            </Tooltip>
+          </Box>
+
+          {/* Counterparty input — differs by direction */}
+          {role === 'maker' && flowDirection === 'ada-usdc' && (
+            <Box sx={{ mt: 2 }}>
+              <Typography
+                sx={{
+                  fontSize: '0.64rem',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: theme.custom.textMuted,
+                  mb: 1,
+                }}
+              >
+                Counterparty Wallet
+              </Typography>
+              <TextField
+                size="small"
+                fullWidth
+                label="Cardano address or PKH"
+                value={counterpartyCardano}
+                onChange={(e) => setCounterpartyCardano(e.target.value)}
+                placeholder="addr_test1… or 56-hex PKH"
+                error={counterpartyCardano.trim().length > 0 && !resolvedCounterpartyPkh}
+                helperText={
+                  counterpartyCardano.trim().length === 0
+                    ? 'Bind the ADA lock to their Cardano wallet.'
+                    : resolvedCounterpartyPkh
+                      ? `PKH ${resolvedCounterpartyPkh.slice(0, 16)}…`
+                      : 'Not a valid Cardano address or 56-hex PKH.'
+                }
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <CallMadeIcon sx={{ fontSize: 14, color: theme.custom.textMuted }} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+          )}
+
+          {role === 'maker' && flowDirection === 'usdc-ada' && (
+            <Stack spacing={1.25} sx={{ mt: 2 }}>
+              <Typography
+                sx={{
+                  fontSize: '0.64rem',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: theme.custom.textMuted,
+                }}
+              >
+                Counterparty Midnight Keys
+              </Typography>
+              <Stack
+                direction="row"
+                alignItems="center"
+                spacing={1}
+                sx={{
+                  p: 1,
+                  borderRadius: 1,
+                  border: `1px dashed ${theme.custom.borderSubtle}`,
+                  bgcolor: alpha(theme.custom.cardanoBlue, 0.04),
+                }}
+              >
+                <Typography variant="caption" sx={{ color: theme.custom.textSecondary, flex: 1 }}>
+                  Got a key bundle from the counterparty? Paste once to fill both fields.
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ContentPasteIcon sx={{ fontSize: 13 }} />}
+                  onClick={() => void onPasteBundle()}
+                >
+                  Paste bundle
+                </Button>
+              </Stack>
+              <TextField
+                size="small"
+                fullWidth
+                label="Shielded coin key"
+                value={counterpartyMidnightCpk}
+                onChange={(e) => onCpkInputChange(e.target.value)}
+                placeholder="mn_shield-cpk_… or bundle cpk:unshielded"
+                error={counterpartyMidnightCpk.trim().length > 0 && !resolvedCounterpartyMidnightCpkBytes}
+                helperText={
+                  counterpartyMidnightCpk.trim().length === 0
+                    ? 'Paste either the coin key alone, or the full cpk:unshielded bundle here.'
+                    : resolvedCounterpartyMidnightCpkBytes
+                      ? 'Valid shielded coin key.'
+                      : 'Not a valid bech32m coin key or 64-hex.'
+                }
+              />
+              <TextField
+                size="small"
+                fullWidth
+                label="Unshielded address"
+                value={counterpartyMidnightUnshielded}
+                onChange={(e) => onUnshieldedInputChange(e.target.value)}
+                placeholder="mn_addr_… or 64-hex"
+                error={counterpartyMidnightUnshielded.trim().length > 0 && !resolvedCounterpartyMidnightUnshieldedBytes}
+                helperText={
+                  counterpartyMidnightUnshielded.trim().length === 0
+                    ? 'Payout destination for the USDC when they claim.'
+                    : resolvedCounterpartyMidnightUnshieldedBytes
+                      ? 'Valid unshielded address.'
+                      : 'Not a valid bech32m address or 64-hex.'
+                }
+              />
+            </Stack>
+          )}
+
+          {/* Taker summary */}
+          {role === 'taker' && fwdUrl && (
+            <OfferSummary
+              hash={fwdUrl.hashHex}
+              deadlineLabel="Cardano deadline"
+              deadlineMs={Number(fwdUrl.cardanoDeadlineMs)}
+            />
+          )}
+          {role === 'taker' && revUrl && (
+            <OfferSummary
+              hash={revUrl.hashHex}
+              deadlineLabel="Midnight deadline"
+              deadlineMs={Number(revUrl.midnightDeadlineMs)}
+            />
+          )}
+
+          {restoreNotice && (
+            <Alert
+              severity="info"
+              sx={{ mt: 2 }}
+              action={
+                <Button size="small" color="inherit" onClick={onForgetPending}>
+                  Discard
+                </Button>
+              }
+            >
+              {restoreNotice}
+            </Alert>
+          )}
+
+          <Box sx={{ mt: 2.5 }}>{cta}</Box>
         </Box>
 
-        {/* Counterparty input — differs by direction */}
-        {role === 'maker' && flowDirection === 'ada-usdc' && (
-          <Box sx={{ mt: 2 }}>
-            <TextField
-              size="small"
-              fullWidth
-              label="Counterparty Cardano address or PKH"
-              value={counterpartyCardano}
-              onChange={(e) => setCounterpartyCardano(e.target.value)}
-              placeholder="addr_test1… or 56-hex PKH"
-              error={counterpartyCardano.trim().length > 0 && !resolvedCounterpartyPkh}
-              helperText={
-                counterpartyCardano.trim().length === 0
-                  ? 'Bind the ADA lock to their Cardano wallet.'
-                  : resolvedCounterpartyPkh
-                    ? `PKH ${resolvedCounterpartyPkh.slice(0, 16)}…`
-                    : 'Not a valid Cardano address or 56-hex PKH.'
-              }
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <CallMadeIcon fontSize="small" sx={{ color: theme.custom.textMuted }} />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Box>
-        )}
-
-        {role === 'maker' && flowDirection === 'usdc-ada' && (
-          <Stack spacing={1.25} sx={{ mt: 2 }}>
-            <Stack
-              direction="row"
-              alignItems="center"
-              spacing={1}
-              sx={{
-                p: 1,
-                borderRadius: 2,
-                border: `1px dashed ${theme.custom.borderSubtle}`,
-                bgcolor: alpha(theme.custom.cardanoBlue, 0.04),
-              }}
-            >
-              <Typography variant="caption" sx={{ color: theme.custom.textSecondary, flex: 1 }}>
-                Got a key bundle from the counterparty? Paste once to fill both fields.
-              </Typography>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<ContentPasteIcon fontSize="small" />}
-                onClick={() => void onPasteBundle()}
-              >
-                Paste bundle
-              </Button>
-            </Stack>
-            <TextField
-              size="small"
-              fullWidth
-              label="Counterparty Midnight shielded coin key"
-              value={counterpartyMidnightCpk}
-              onChange={(e) => onCpkInputChange(e.target.value)}
-              placeholder="mn_shield-cpk_… or bundle cpk:unshielded"
-              error={counterpartyMidnightCpk.trim().length > 0 && !resolvedCounterpartyMidnightCpkBytes}
-              helperText={
-                counterpartyMidnightCpk.trim().length === 0
-                  ? 'Paste either the coin key alone, or the full cpk:unshielded bundle here.'
-                  : resolvedCounterpartyMidnightCpkBytes
-                    ? 'Valid shielded coin key.'
-                    : 'Not a valid bech32m coin key or 64-hex.'
-              }
-            />
-            <TextField
-              size="small"
-              fullWidth
-              label="Counterparty Midnight unshielded address"
-              value={counterpartyMidnightUnshielded}
-              onChange={(e) => onUnshieldedInputChange(e.target.value)}
-              placeholder="mn_addr_… or 64-hex"
-              error={counterpartyMidnightUnshielded.trim().length > 0 && !resolvedCounterpartyMidnightUnshieldedBytes}
-              helperText={
-                counterpartyMidnightUnshielded.trim().length === 0
-                  ? 'Payout destination for the USDC when they claim.'
-                  : resolvedCounterpartyMidnightUnshieldedBytes
-                    ? 'Valid unshielded address.'
-                    : 'Not a valid bech32m address or 64-hex.'
-              }
-            />
-          </Stack>
-        )}
-
-        {/* Taker summary */}
-        {role === 'taker' && fwdUrl && (
-          <OfferSummary
-            hash={fwdUrl.hashHex}
-            deadlineLabel="Cardano deadline"
-            deadlineMs={Number(fwdUrl.cardanoDeadlineMs)}
-          />
-        )}
-        {role === 'taker' && revUrl && (
-          <OfferSummary
-            hash={revUrl.hashHex}
-            deadlineLabel="Midnight deadline"
-            deadlineMs={Number(revUrl.midnightDeadlineMs)}
-          />
-        )}
-
-        {restoreNotice && (
-          <Alert
-            severity="info"
-            sx={{ mt: 2 }}
-            action={
-              <Button size="small" color="inherit" onClick={onForgetPending}>
-                Discard
-              </Button>
-            }
-          >
-            {restoreNotice}
-          </Alert>
-        )}
-
-        <Box sx={{ mt: 2.5 }}>{cta}</Box>
-
-        <Divider sx={{ mt: 2.5, mb: 1.5 }} />
+        {/* Footer */}
         <Stack
           direction="row"
           spacing={1}
           alignItems="center"
           justifyContent="center"
-          sx={{ color: theme.custom.textMuted, fontSize: '0.76rem' }}
+          sx={{
+            borderTop: `1px solid ${theme.custom.borderSubtle}`,
+            px: 2,
+            py: 1.25,
+            color: theme.custom.textMuted,
+            fontSize: '0.66rem',
+          }}
         >
-          <Typography variant="caption" sx={{ color: 'inherit' }}>
+          <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
             Need USDC?
           </Typography>
           <Link
@@ -678,7 +750,7 @@ export const SwapCard: React.FC = () => {
           >
             Mint on Midnight
           </Link>
-          <Typography variant="caption" sx={{ color: 'inherit' }}>
+          <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
             ·
           </Typography>
           <Link
@@ -752,13 +824,24 @@ const OfferSummary: React.FC<{ hash: string; deadlineLabel: string; deadlineMs: 
       sx={{
         mt: 2,
         p: 2,
-        borderRadius: 3,
-        border: `1px solid ${alpha(theme.custom.cardanoBlue, 0.35)}`,
-        bgcolor: alpha(theme.custom.cardanoBlue, 0.05),
+        borderRadius: 1,
+        border: `1px solid ${alpha(theme.custom.cardanoBlue, 0.25)}`,
+        bgcolor: alpha(theme.custom.cardanoBlue, 0.04),
       }}
     >
+      <Typography
+        sx={{
+          fontSize: '0.64rem',
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: theme.custom.textMuted,
+          mb: 1,
+        }}
+      >
+        Offer Details
+      </Typography>
       <Stack spacing={0.5}>
-        <Typography sx={{ fontWeight: 600, color: theme.custom.textPrimary }}>Offer details</Typography>
         <Row k="Hash" v={hash.slice(0, 32) + '…'} />
         <Row k={deadlineLabel} v={new Date(deadlineMs).toLocaleString()} />
       </Stack>
@@ -770,10 +853,18 @@ const Row: React.FC<{ k: string; v: string }> = ({ k, v }) => {
   const theme = useTheme();
   return (
     <Stack direction="row" spacing={1.5}>
-      <Typography variant="caption" sx={{ color: theme.custom.textMuted, minWidth: 120 }}>
+      <Typography
+        sx={{
+          fontSize: '0.68rem',
+          color: theme.custom.textMuted,
+          minWidth: 120,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+        }}
+      >
         {k}
       </Typography>
-      <Typography variant="caption" sx={{ color: theme.custom.textPrimary, fontFamily: 'JetBrains Mono, monospace' }}>
+      <Typography sx={{ fontSize: '0.68rem', color: theme.custom.textPrimary }}>
         {v}
       </Typography>
     </Stack>

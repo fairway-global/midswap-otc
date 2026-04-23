@@ -1,7 +1,7 @@
 /**
- * /activity — read-only view of every swap the orchestrator has indexed,
- * aggregated into top-line metrics and a per-row table with transaction
- * deep-links on both chains.
+ * /activity — settlement monitor. Read-only view of every swap the orchestrator
+ * has indexed, aggregated into top-line metrics and a per-row table with
+ * transaction deep-links on both chains.
  *
  * Chain state is authoritative; this page is a convenience view.
  */
@@ -25,7 +25,7 @@ import {
 import RefreshIcon from '@mui/icons-material/Refresh';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import DatasetLinkedIcon from '@mui/icons-material/DatasetLinked';
-import { useTheme } from '@mui/material/styles';
+import { alpha, useTheme } from '@mui/material/styles';
 import { orchestratorClient, type Swap, type SwapStatus } from '../api/orchestrator-client';
 import { statusLabel, SwapStatusChip } from './SwapStatusChip';
 
@@ -125,7 +125,7 @@ export const Activity: React.FC = () => {
   const txLink = (chain: 'midnight' | 'cardano', hash: string | null): React.ReactNode => {
     if (!hash)
       return (
-        <Typography variant="caption" sx={{ color: theme.custom.textMuted }}>
+        <Typography sx={{ color: theme.custom.textMuted, fontSize: '0.68rem' }}>
           —
         </Typography>
       );
@@ -134,29 +134,60 @@ export const Activity: React.FC = () => {
         href={`${TX_SCAN_BASE[chain]}${hash}`}
         target="_blank"
         rel="noopener noreferrer"
-        style={{ color: theme.custom.cardanoBlue, textDecoration: 'none', fontSize: 12 }}
+        style={{ color: theme.custom.cardanoBlue, textDecoration: 'none', fontSize: '0.68rem' }}
       >
-        <code style={{ fontSize: 12 }}>{shortHash(hash)}</code>
+        <code style={{ fontSize: '0.68rem' }}>{shortHash(hash)}</code>
         <OpenInNewIcon fontSize="inherit" sx={{ verticalAlign: 'text-bottom', ml: 0.25 }} />
       </a>
     );
   };
 
   return (
-    <Stack spacing={3} sx={{ width: '100%', maxWidth: 1280, mx: 'auto' }}>
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-        <Stack spacing={0.25} sx={{ flex: 1, minWidth: 200 }}>
-          <Typography variant="h4">Activity</Typography>
-          <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
+    <Stack spacing={2} sx={{ width: '100%' }}>
+      {/* Page header — ContraClear panel style */}
+      <Box
+        sx={{
+          borderRadius: 2,
+          border: `1px solid ${theme.custom.borderSubtle}`,
+          bgcolor: theme.custom.surface1,
+          overflow: 'hidden',
+        }}
+      >
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
+          sx={{
+            px: 2,
+            py: 1.5,
+            borderBottom: `1px solid ${theme.custom.borderSubtle}`,
+          }}
+        >
+          <Typography
+            sx={{
+              fontSize: '0.68rem',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              color: theme.custom.textMuted,
+            }}
+          >
+            Settlement Monitor
+          </Typography>
+          <Box sx={{ flex: 1 }} />
+          <Tooltip title="Refresh">
+            <IconButton onClick={() => void refresh()} disabled={loading} size="small">
+              <RefreshIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
+
+        <Box sx={{ p: 2 }}>
+          <Typography sx={{ fontSize: '0.78rem', color: theme.custom.textSecondary }}>
             Every swap the orchestrator has indexed. Chain state is authoritative.
           </Typography>
-        </Stack>
-        <Tooltip title="Refresh">
-          <IconButton onClick={() => void refresh()} disabled={loading}>
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
-      </Stack>
+        </Box>
+      </Box>
 
       {error && (
         <Alert severity="error">
@@ -168,15 +199,21 @@ export const Activity: React.FC = () => {
       )}
 
       {loading && !swaps && (
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
           {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} variant="rounded" height={120} sx={{ borderRadius: 4, flex: 1 }} />
+            <Skeleton key={i} variant="rounded" height={100} sx={{ borderRadius: 2, flex: 1 }} />
           ))}
         </Stack>
       )}
 
       {aggregate && (
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr 1fr', md: '1fr 1fr 1fr 1fr' },
+            gap: 1.5,
+          }}
+        >
           <MetricCard
             label="Total tracked"
             value={aggregate.total.toString()}
@@ -208,19 +245,19 @@ export const Activity: React.FC = () => {
             tone={aggregate.stuck > 0 ? 'warning' : 'muted'}
             hint="deadline passed"
           />
-        </Stack>
+        </Box>
       )}
 
       {aggregate && (
         <Box
           sx={{
             p: 1.5,
-            borderRadius: 3,
+            borderRadius: 2,
             border: `1px solid ${theme.custom.borderSubtle}`,
             bgcolor: theme.custom.surface1,
           }}
         >
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
             {(Object.keys(aggregate.byStatus) as SwapStatus[]).map((s) => (
               <Chip
                 key={s}
@@ -236,7 +273,7 @@ export const Activity: React.FC = () => {
       {swaps && swaps.length > 0 && (
         <Box
           sx={{
-            borderRadius: 4,
+            borderRadius: 2,
             border: `1px solid ${theme.custom.borderSubtle}`,
             bgcolor: theme.custom.surface1,
             overflowX: 'auto',
@@ -252,17 +289,17 @@ export const Activity: React.FC = () => {
                 <TableCell align="right">USDC</TableCell>
                 <TableCell>Age</TableCell>
                 <TableCell>Deadlines</TableCell>
-                <TableCell>Cardano lock</TableCell>
-                <TableCell>Cardano claim</TableCell>
-                <TableCell>Midnight deposit</TableCell>
-                <TableCell>Midnight claim</TableCell>
+                <TableCell>Cardano Lock</TableCell>
+                <TableCell>Cardano Claim</TableCell>
+                <TableCell>Midnight Deposit</TableCell>
+                <TableCell>Midnight Claim</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {swaps.map((s) => (
                 <TableRow key={s.hash} hover>
                   <TableCell>
-                    <Typography variant="caption" sx={{ fontFamily: 'JetBrains Mono, monospace' }}>
+                    <Typography sx={{ fontSize: '0.68rem' }}>
                       {shortHash(s.hash)}
                     </Typography>
                   </TableCell>
@@ -278,7 +315,7 @@ export const Activity: React.FC = () => {
                   <TableCell>
                     <Stack spacing={0.25}>
                       {s.cardanoDeadlineMs !== null && (
-                        <Typography variant="caption">
+                        <Typography sx={{ fontSize: '0.68rem' }}>
                           C:{' '}
                           {new Date(s.cardanoDeadlineMs).toLocaleString([], {
                             month: 'short',
@@ -289,7 +326,7 @@ export const Activity: React.FC = () => {
                         </Typography>
                       )}
                       {s.midnightDeadlineMs !== null && (
-                        <Typography variant="caption">
+                        <Typography sx={{ fontSize: '0.68rem' }}>
                           M:{' '}
                           {new Date(s.midnightDeadlineMs).toLocaleString([], {
                             month: 'short',
@@ -315,16 +352,16 @@ export const Activity: React.FC = () => {
       {swaps && swaps.length === 0 && (
         <Box
           sx={{
-            p: 6,
-            borderRadius: 4,
+            p: 5,
+            borderRadius: 2,
             border: `1px dashed ${theme.custom.borderSubtle}`,
             textAlign: 'center',
             bgcolor: theme.custom.surface1,
           }}
         >
-          <DatasetLinkedIcon sx={{ fontSize: 44, color: theme.custom.textMuted, mb: 1 }} />
-          <Typography sx={{ fontWeight: 600, mb: 0.5 }}>No swaps tracked yet</Typography>
-          <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
+          <DatasetLinkedIcon sx={{ fontSize: 36, color: theme.custom.textMuted, mb: 1 }} />
+          <Typography sx={{ fontWeight: 600, fontSize: '0.84rem', mb: 0.5 }}>No swaps tracked yet</Typography>
+          <Typography sx={{ color: theme.custom.textSecondary, fontSize: '0.72rem' }}>
             Every new offer or accepted swap will show up here automatically.
           </Typography>
         </Box>
@@ -351,29 +388,26 @@ const MetricCard: React.FC<{
   return (
     <Box
       sx={{
-        flex: 1,
-        minWidth: 180,
-        p: 2.5,
-        borderRadius: 4,
+        p: 2,
+        borderRadius: 2,
         border: `1px solid ${theme.custom.borderSubtle}`,
         bgcolor: theme.custom.surface1,
       }}
     >
       <Typography
-        variant="caption"
         sx={{
           color: theme.custom.textMuted,
           textTransform: 'uppercase',
           letterSpacing: '0.06em',
           fontWeight: 600,
-          fontSize: 11,
+          fontSize: '0.62rem',
         }}
       >
         {label}
       </Typography>
-      <Typography sx={{ fontSize: '2.1rem', fontWeight: 600, color, lineHeight: 1.1, mt: 0.5 }}>{value}</Typography>
+      <Typography sx={{ fontSize: '1.6rem', fontWeight: 600, color, lineHeight: 1.1, mt: 0.5 }}>{value}</Typography>
       {hint && (
-        <Typography variant="caption" sx={{ color: theme.custom.textMuted, display: 'block', mt: 0.5 }}>
+        <Typography sx={{ color: theme.custom.textMuted, fontSize: '0.62rem', display: 'block', mt: 0.5 }}>
           {hint}
         </Typography>
       )}

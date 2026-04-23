@@ -1,5 +1,15 @@
+/**
+ * Midswap OTC — ContraClear-style layout shell.
+ *
+ * Full-width panel structure with:
+ *   - Sticky header with border-bottom
+ *   - Full-width content area with horizontal padding
+ *   - Footer bar with network info
+ *   - Subtle backdrop glow (Cardano-blue radial)
+ */
+
 import React from 'react';
-import { Box, Container } from '@mui/material';
+import { Box, Stack, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import { Header } from './Header';
 import { RecoveryBanner } from '../RecoveryBanner';
@@ -23,23 +33,78 @@ export const MainLayout: React.FC<React.PropsWithChildren> = ({ children }) => {
           pointerEvents: 'none',
           position: 'fixed',
           inset: 0,
-          backgroundImage: `radial-gradient(ellipse 60% 50% at 50% 0%, ${alpha(
+          backgroundImage: `radial-gradient(circle at top, ${alpha(
             theme.custom.cardanoBlue,
-            0.2,
-          )} 0%, transparent 60%), radial-gradient(ellipse 50% 40% at 85% 10%, ${alpha(
-            '#7C5BFF',
-            0.12,
-          )} 0%, transparent 55%)`,
+            0.08,
+          )} 0%, transparent 45%)`,
+          zIndex: 0,
+        }}
+      />
+
+      {/* Grid overlay — terminal aesthetic */}
+      <Box
+        aria-hidden="true"
+        sx={{
+          pointerEvents: 'none',
+          position: 'fixed',
+          inset: 0,
+          opacity: 0.4,
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)',
+          backgroundSize: '32px 32px',
           zIndex: 0,
         }}
       />
 
       <Box sx={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', flex: 1 }}>
         <Header />
-        <Container maxWidth="lg" sx={{ py: { xs: 3, md: 5 }, flexGrow: 1 }}>
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            px: { xs: 2, md: 3 },
+            py: { xs: 2, md: 3 },
+          }}
+        >
           <RecoveryBanner />
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>{children}</Box>
-        </Container>
+          <Stack spacing={2.5}>{children}</Stack>
+        </Box>
+
+        {/* Footer — ContraClear style */}
+        <Box
+          component="footer"
+          sx={{
+            borderTop: `1px solid ${theme.custom.borderSubtle}`,
+            px: { xs: 2, md: 3 },
+            py: 1.5,
+          }}
+        >
+          <Stack
+            direction={{ xs: 'column', md: 'row' }}
+            spacing={1}
+            alignItems={{ md: 'center' }}
+            justifyContent="space-between"
+          >
+            <Typography
+              sx={{
+                fontSize: '0.68rem',
+                color: theme.custom.textMuted,
+                letterSpacing: '0.02em',
+              }}
+            >
+              Midswap OTC. Cross-chain atomic settlement on Midnight × Cardano.
+            </Typography>
+            <Typography
+              sx={{
+                fontSize: '0.68rem',
+                color: theme.custom.textMuted,
+                letterSpacing: '0.02em',
+              }}
+            >
+              Network: Preprod
+            </Typography>
+          </Stack>
+        </Box>
       </Box>
     </Box>
   );

@@ -1,11 +1,11 @@
 /**
- * Design system — Cardano-blue on Midnight-dark, Uniswap-inspired geometry.
+ * Design system — Cardano-blue on Midnight-dark, ContraClear terminal layout.
  *
  *   background  midnight near-black with a violet undertone
  *   surface     layered dark navy for cards and inputs
  *   accent      Cardano royal blue — used for primary CTAs and focus rings
- *   radii       999 for buttons (pill), 24 for cards, 20 for inputs
- *   font        Inter via Google Fonts (linked in index.html)
+ *   radii       terminal-tight: 8 for panels, 6 for inputs, 999 for pills
+ *   font        JetBrains Mono primary, Inter fallback (loaded in index.html)
  *
  * All custom tokens live on `theme.custom` so pages can reach them
  * without re-deriving palette math.
@@ -33,6 +33,8 @@ declare module '@mui/material/styles' {
       textPrimary: string;
       textSecondary: string;
       textMuted: string;
+      terminalGreen: string;
+      terminalRed: string;
     };
   }
   interface ThemeOptions {
@@ -66,8 +68,14 @@ const success = '#4ADE80';
 const warning = '#FBBF24';
 const danger = '#F87171';
 
+const terminalGreen = '#39FF14';
+const terminalRed = '#FF3B3B';
+
 const accentGradient = `linear-gradient(135deg, ${cardanoBlueBright} 0%, ${cardanoBlue} 45%, ${cardanoBlueDeep} 100%)`;
 const midnightGlow = `radial-gradient(circle at 50% -10%, ${alpha(cardanoBlue, 0.22)} 0%, transparent 55%)`;
+
+const monoStack = "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace";
+const sansStack = "'Inter', 'InterVariable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 const options: ThemeOptions = {
   palette: {
@@ -98,23 +106,22 @@ const options: ThemeOptions = {
     surface: { main: surface2, light: surface3, dark: surface1, contrastText: textPrimary },
   },
   typography: {
-    fontFamily:
-      "'Inter', 'InterVariable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    h1: { fontWeight: 700, letterSpacing: '-0.02em' },
-    h2: { fontWeight: 700, letterSpacing: '-0.02em' },
-    h3: { fontWeight: 700, letterSpacing: '-0.02em', fontSize: '2.25rem' },
-    h4: { fontWeight: 600, letterSpacing: '-0.015em', fontSize: '1.65rem' },
-    h5: { fontWeight: 600, letterSpacing: '-0.01em', fontSize: '1.25rem' },
-    h6: { fontWeight: 600, letterSpacing: '-0.01em' },
+    fontFamily: monoStack,
+    h1: { fontWeight: 700, letterSpacing: '-0.02em', fontFamily: sansStack },
+    h2: { fontWeight: 700, letterSpacing: '-0.02em', fontFamily: sansStack },
+    h3: { fontWeight: 700, letterSpacing: '-0.02em', fontSize: '2.25rem', fontFamily: sansStack },
+    h4: { fontWeight: 600, letterSpacing: '-0.015em', fontSize: '1.65rem', fontFamily: sansStack },
+    h5: { fontWeight: 600, letterSpacing: '-0.01em', fontSize: '1.25rem', fontFamily: sansStack },
+    h6: { fontWeight: 600, letterSpacing: '-0.01em', fontFamily: sansStack },
     subtitle1: { fontWeight: 500 },
     subtitle2: { fontWeight: 500 },
     button: { fontWeight: 600, textTransform: 'none', letterSpacing: 0 },
-    body1: { fontSize: '0.96rem', lineHeight: 1.55 },
-    body2: { fontSize: '0.86rem', lineHeight: 1.5 },
-    caption: { letterSpacing: 0 },
+    body1: { fontSize: '0.88rem', lineHeight: 1.55 },
+    body2: { fontSize: '0.8rem', lineHeight: 1.5 },
+    caption: { letterSpacing: '0.02em', fontSize: '0.72rem' },
     allVariants: { color: textPrimary },
   },
-  shape: { borderRadius: 16 },
+  shape: { borderRadius: 8 },
   custom: {
     surface0,
     surface1,
@@ -133,6 +140,8 @@ const options: ThemeOptions = {
     textPrimary,
     textSecondary,
     textMuted,
+    terminalGreen,
+    terminalRed,
   },
   components: {
     MuiCssBaseline: {
@@ -151,16 +160,17 @@ const options: ThemeOptions = {
           backgroundRepeat: 'no-repeat',
         },
         'code, kbd, pre, samp': {
-          fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace",
+          fontFamily: monoStack,
         },
         '*::selection': {
           background: alpha(cardanoBlue, 0.35),
           color: textPrimary,
         },
-        '*::-webkit-scrollbar': { width: 10, height: 10 },
+        '*::-webkit-scrollbar': { width: 6, height: 6 },
+        '*::-webkit-scrollbar-track': { background: surface0 },
         '*::-webkit-scrollbar-thumb': {
           background: alpha('#ffffff', 0.08),
-          borderRadius: 6,
+          borderRadius: 3,
         },
         '*::-webkit-scrollbar-thumb:hover': {
           background: alpha('#ffffff', 0.14),
@@ -172,7 +182,7 @@ const options: ThemeOptions = {
       styleOverrides: {
         root: {
           backgroundImage: 'none',
-          borderRadius: 20,
+          borderRadius: 8,
           backgroundColor: surface1,
           border: `1px solid ${borderSubtle}`,
         },
@@ -184,15 +194,15 @@ const options: ThemeOptions = {
         root: {
           backgroundColor: surface1,
           border: `1px solid ${borderSubtle}`,
-          borderRadius: 20,
+          borderRadius: 8,
         },
       },
     },
     MuiCardContent: {
       styleOverrides: {
         root: {
-          padding: '20px 22px',
-          '&:last-child': { paddingBottom: 20 },
+          padding: '16px 18px',
+          '&:last-child': { paddingBottom: 16 },
         },
       },
     },
@@ -200,23 +210,25 @@ const options: ThemeOptions = {
       defaultProps: { disableElevation: true },
       styleOverrides: {
         root: {
-          borderRadius: 999,
+          borderRadius: 6,
           fontWeight: 600,
-          padding: '9px 18px',
+          fontFamily: monoStack,
+          fontSize: '0.78rem',
+          padding: '8px 16px',
           textTransform: 'none',
           transition: 'all 140ms ease',
         },
         sizeLarge: {
-          padding: '14px 24px',
-          fontSize: '1rem',
+          padding: '12px 22px',
+          fontSize: '0.88rem',
         },
         containedPrimary: {
           background: accentGradient,
-          boxShadow: `0 10px 30px ${alpha(cardanoBlue, 0.25)}`,
+          boxShadow: `0 8px 24px ${alpha(cardanoBlue, 0.25)}`,
           '&:hover': {
             background: accentGradient,
-            boxShadow: `0 14px 36px ${alpha(cardanoBlue, 0.38)}`,
-            transform: 'translateY(-1px)',
+            boxShadow: `0 10px 30px ${alpha(cardanoBlue, 0.38)}`,
+            filter: 'brightness(1.1)',
           },
           '&.Mui-disabled': {
             background: alpha(cardanoBlue, 0.22),
@@ -246,7 +258,7 @@ const options: ThemeOptions = {
     MuiIconButton: {
       styleOverrides: {
         root: {
-          borderRadius: 12,
+          borderRadius: 6,
           color: textSecondary,
           '&:hover': {
             color: textPrimary,
@@ -261,7 +273,9 @@ const options: ThemeOptions = {
     MuiOutlinedInput: {
       styleOverrides: {
         root: {
-          borderRadius: 14,
+          borderRadius: 6,
+          fontFamily: monoStack,
+          fontSize: '0.82rem',
           backgroundColor: alpha('#ffffff', 0.02),
           transition: 'border-color 140ms ease, background-color 140ms ease',
           '& fieldset': { borderColor: borderSubtle },
@@ -271,13 +285,15 @@ const options: ThemeOptions = {
             '& fieldset': { borderColor: cardanoBlue, borderWidth: 1 },
           },
         },
-        input: { padding: '14px 16px' },
+        input: { padding: '12px 14px' },
       },
     },
     MuiInputLabel: {
       styleOverrides: {
         root: {
           color: textMuted,
+          fontFamily: monoStack,
+          fontSize: '0.78rem',
           '&.Mui-focused': { color: cardanoBlueBright },
         },
       },
@@ -285,11 +301,13 @@ const options: ThemeOptions = {
     MuiChip: {
       styleOverrides: {
         root: {
-          borderRadius: 999,
+          borderRadius: 4,
           fontWeight: 500,
-          fontSize: '0.78rem',
-          letterSpacing: 0,
-          height: 26,
+          fontFamily: monoStack,
+          fontSize: '0.68rem',
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase' as const,
+          height: 24,
         },
         outlined: {
           borderColor: borderStrong,
@@ -320,11 +338,13 @@ const options: ThemeOptions = {
     MuiAlert: {
       styleOverrides: {
         root: {
-          borderRadius: 16,
+          borderRadius: 6,
           border: `1px solid ${borderSubtle}`,
           backgroundColor: surface1,
-          padding: '10px 14px',
+          padding: '8px 12px',
           alignItems: 'center',
+          fontFamily: monoStack,
+          fontSize: '0.78rem',
         },
         standardInfo: {
           backgroundColor: alpha(cardanoBlue, 0.1),
@@ -356,7 +376,7 @@ const options: ThemeOptions = {
       defaultProps: { elevation: 0 },
       styleOverrides: {
         root: {
-          backgroundColor: alpha(surface0, 0.8),
+          backgroundColor: surface1,
           backdropFilter: 'blur(18px)',
           WebkitBackdropFilter: 'blur(18px)',
           borderBottom: `1px solid ${borderSubtle}`,
@@ -365,7 +385,7 @@ const options: ThemeOptions = {
       },
     },
     MuiToolbar: {
-      styleOverrides: { root: { minHeight: 68 } },
+      styleOverrides: { root: { minHeight: 56 } },
     },
     MuiDivider: {
       styleOverrides: { root: { borderColor: borderSubtle } },
@@ -374,10 +394,9 @@ const options: ThemeOptions = {
       styleOverrides: {
         paper: {
           backgroundColor: surface1,
-          backgroundImage: midnightGlow,
-          backgroundRepeat: 'no-repeat',
+          backgroundImage: 'none',
           border: `1px solid ${borderSubtle}`,
-          borderRadius: 24,
+          borderRadius: 8,
         },
       },
     },
@@ -387,10 +406,11 @@ const options: ThemeOptions = {
           backgroundColor: surface3,
           color: textPrimary,
           border: `1px solid ${borderStrong}`,
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: 500,
-          borderRadius: 10,
-          padding: '6px 10px',
+          fontFamily: monoStack,
+          borderRadius: 4,
+          padding: '5px 8px',
         },
         arrow: { color: surface3 },
       },
@@ -410,10 +430,12 @@ const options: ThemeOptions = {
           '& .MuiTableCell-root': {
             color: textMuted,
             fontWeight: 600,
-            fontSize: '0.76rem',
+            fontFamily: monoStack,
+            fontSize: '0.68rem',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
             borderBottomColor: borderSubtle,
+            padding: '10px 14px',
           },
         },
       },
@@ -422,6 +444,9 @@ const options: ThemeOptions = {
       styleOverrides: {
         root: {
           borderBottomColor: borderSubtle,
+          fontFamily: monoStack,
+          fontSize: '0.78rem',
+          padding: '10px 14px',
         },
       },
     },
@@ -431,7 +456,8 @@ const options: ThemeOptions = {
           backgroundColor: surface2,
           color: textPrimary,
           border: `1px solid ${borderSubtle}`,
-          borderRadius: 14,
+          borderRadius: 6,
+          fontFamily: monoStack,
         },
       },
     },

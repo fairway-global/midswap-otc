@@ -1,5 +1,5 @@
 /**
- * /browse — open offer marketplace. Lists every open swap in the orchestrator
+ * /browse — OTC order book. Lists every open swap in the orchestrator
  * DB with filters for "targets your wallet" vs "any wallet". Each row is an
  * offer card with the amounts, deadline, and a Take button.
  *
@@ -116,81 +116,116 @@ export const Browse: React.FC = () => {
           params.set('midnightDeadlineMs', swap.midnightDeadlineMs.toString());
         }
       }
-      void navigate(`/?${params.toString()}`);
+      void navigate(`/app?${params.toString()}`);
     },
     [navigate],
   );
 
   return (
-    <Stack spacing={3} sx={{ width: '100%', maxWidth: 860, mx: 'auto' }}>
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-        <Stack spacing={0.25} sx={{ flex: 1, minWidth: 200 }}>
-          <Typography variant="h4">Open offers</Typography>
-          <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
-            Locks posted by makers, waiting for a taker to accept.
-          </Typography>
-        </Stack>
-        <ToggleButtonGroup
-          size="small"
-          value={filter}
-          exclusive
-          onChange={(_, v: Filter | null) => v && setFilter(v)}
+    <Stack spacing={2} sx={{ width: '100%' }}>
+      {/* Page header — ContraClear panel style */}
+      <Box
+        sx={{
+          borderRadius: 2,
+          border: `1px solid ${theme.custom.borderSubtle}`,
+          bgcolor: theme.custom.surface1,
+          overflow: 'hidden',
+        }}
+      >
+        <Stack
+          direction="row"
+          alignItems="center"
+          spacing={1}
           sx={{
-            bgcolor: theme.custom.surface2,
-            borderRadius: 999,
-            p: 0.5,
-            '& .MuiToggleButton-root': {
-              border: 0,
-              borderRadius: '999px !important',
-              px: 1.75,
-              py: 0.5,
-              color: theme.custom.textSecondary,
-              fontWeight: 500,
-              textTransform: 'none',
-              '&.Mui-selected': {
-                bgcolor: theme.custom.surface3,
-                color: theme.custom.textPrimary,
-              },
-            },
+            px: 2,
+            py: 1.5,
+            borderBottom: `1px solid ${theme.custom.borderSubtle}`,
           }}
         >
-          <ToggleButton value="all">All</ToggleButton>
-          <ToggleButton value="mine" disabled={!myPkh}>
-            For my wallet
-          </ToggleButton>
-        </ToggleButtonGroup>
-        <Tooltip title="Refresh">
-          <IconButton onClick={() => void refresh()} disabled={loading}>
-            <RefreshIcon />
-          </IconButton>
-        </Tooltip>
-      </Stack>
-
-      {!cardano && (
-        <Alert severity="info">Connect your Cardano wallet so Midswap can tell you which offers target your PKH.</Alert>
-      )}
-
-      {error && (
-        <Alert severity="error">
-          Orchestrator unreachable: {error}
-          <Typography variant="caption" component="div" sx={{ mt: 0.5, opacity: 0.7 }}>
-            Start it: <code>cd htlc-orchestrator &amp;&amp; npm run dev</code>
+          <Typography
+            sx={{
+              fontSize: '0.68rem',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              color: theme.custom.textMuted,
+            }}
+          >
+            OTC Order Book
           </Typography>
-        </Alert>
-      )}
+          <Box sx={{ flex: 1 }} />
+          <ToggleButtonGroup
+            size="small"
+            value={filter}
+            exclusive
+            onChange={(_, v: Filter | null) => v && setFilter(v)}
+            sx={{
+              bgcolor: theme.custom.surface2,
+              borderRadius: 1,
+              p: 0.25,
+              '& .MuiToggleButton-root': {
+                border: 0,
+                borderRadius: '4px !important',
+                px: 1.5,
+                py: 0.25,
+                fontSize: '0.64rem',
+                letterSpacing: '0.04em',
+                color: theme.custom.textMuted,
+                fontWeight: 500,
+                textTransform: 'uppercase',
+                '&.Mui-selected': {
+                  bgcolor: theme.custom.surface3,
+                  color: theme.custom.textPrimary,
+                },
+              },
+            }}
+          >
+            <ToggleButton value="all">All</ToggleButton>
+            <ToggleButton value="mine" disabled={!myPkh}>
+              For My Wallet
+            </ToggleButton>
+          </ToggleButtonGroup>
+          <Tooltip title="Refresh">
+            <IconButton onClick={() => void refresh()} disabled={loading} size="small">
+              <RefreshIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
 
-      {ownCount > 0 && (
-        <Alert severity="info" sx={{ bgcolor: alpha(theme.custom.cardanoBlue, 0.08) }}>
-          {ownCount === 1
-            ? 'Your own open offer is hidden — manage it on the Swap page.'
-            : `${ownCount} of your own open offers are hidden — manage them on the Swap page.`}
-        </Alert>
-      )}
+        <Box sx={{ p: 2 }}>
+          <Typography sx={{ fontSize: '0.78rem', color: theme.custom.textSecondary, mb: 0.5 }}>
+            Locks posted by makers, waiting for a taker to accept.
+          </Typography>
+
+          {!cardano && (
+            <Alert severity="info" sx={{ mt: 1.5 }}>
+              Connect your Cardano wallet so Midswap OTC can tell you which offers target your PKH.
+            </Alert>
+          )}
+
+          {error && (
+            <Alert severity="error" sx={{ mt: 1.5 }}>
+              Orchestrator unreachable: {error}
+              <Typography variant="caption" component="div" sx={{ mt: 0.5, opacity: 0.7 }}>
+                Start it: <code>cd htlc-orchestrator &amp;&amp; npm run dev</code>
+              </Typography>
+            </Alert>
+          )}
+
+          {ownCount > 0 && (
+            <Alert severity="info" sx={{ mt: 1.5, bgcolor: alpha(theme.custom.cardanoBlue, 0.08) }}>
+              {ownCount === 1
+                ? 'Your own open offer is hidden — manage it on the OTC page.'
+                : `${ownCount} of your own open offers are hidden — manage them on the OTC page.`}
+            </Alert>
+          )}
+        </Box>
+      </Box>
 
       {loading && !swaps && (
-        <Stack spacing={1.5}>
+        <Stack spacing={1}>
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} variant="rounded" height={118} sx={{ borderRadius: 4 }} />
+            <Skeleton key={i} variant="rounded" height={100} sx={{ borderRadius: 2 }} />
           ))}
         </Stack>
       )}
@@ -198,27 +233,27 @@ export const Browse: React.FC = () => {
       {visible && visible.length === 0 && (
         <Box
           sx={{
-            p: 6,
-            borderRadius: 4,
+            p: 5,
+            borderRadius: 2,
             border: `1px dashed ${theme.custom.borderSubtle}`,
             bgcolor: theme.custom.surface1,
             textAlign: 'center',
           }}
         >
-          <InboxIcon sx={{ fontSize: 44, color: theme.custom.textMuted, mb: 1 }} />
-          <Typography sx={{ fontWeight: 600, mb: 0.5 }}>
+          <InboxIcon sx={{ fontSize: 36, color: theme.custom.textMuted, mb: 1 }} />
+          <Typography sx={{ fontWeight: 600, fontSize: '0.84rem', mb: 0.5 }}>
             {filter === 'mine' ? 'No offers addressed to your wallet' : 'No open offers right now'}
           </Typography>
-          <Typography variant="body2" sx={{ color: theme.custom.textSecondary, mb: 2 }}>
+          <Typography sx={{ color: theme.custom.textSecondary, fontSize: '0.72rem', mb: 2 }}>
             Offers expire fast on preprod — check back in a minute, or make one yourself.
           </Typography>
-          <Button variant="contained" color="primary" onClick={() => navigate('/')}>
-            Make an offer
+          <Button variant="contained" color="primary" onClick={() => navigate('/app')}>
+            Create offer
           </Button>
         </Box>
       )}
 
-      <Stack spacing={1.5}>
+      <Stack spacing={1}>
         {visible?.map((swap) => (
           <OfferCard key={swap.hash} swap={swap} myPkh={myPkh} myCpk={myCpk} onTake={onTake} />
         ))}
@@ -259,8 +294,8 @@ const OfferCard: React.FC<{
   return (
     <Box
       sx={{
-        p: 2.5,
-        borderRadius: 4,
+        p: 2,
+        borderRadius: 2,
         border: `1px solid ${walletMatches ? alpha(theme.custom.cardanoBlue, 0.3) : theme.custom.borderSubtle}`,
         bgcolor: walletMatches ? alpha(theme.custom.cardanoBlue, 0.04) : theme.custom.surface1,
         transition: 'border-color 140ms ease',
@@ -269,19 +304,19 @@ const OfferCard: React.FC<{
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
           <Stack direction="row" spacing={-0.75}>
-            <TokenBadge token={isForward ? ADA : USDC} size={34} />
-            <Box sx={{ transform: 'translateX(-10px)' }}>
-              <TokenBadge token={isForward ? USDC : ADA} size={34} />
+            <TokenBadge token={isForward ? ADA : USDC} size={30} />
+            <Box sx={{ transform: 'translateX(-8px)' }}>
+              <TokenBadge token={isForward ? USDC : ADA} size={30} />
             </Box>
           </Stack>
           <Stack>
             <Stack direction="row" spacing={1} alignItems="center">
-              <Typography sx={{ fontWeight: 600 }}>{titleLabel}</Typography>
+              <Typography sx={{ fontWeight: 600, fontSize: '0.84rem' }}>{titleLabel}</Typography>
               <Chip size="small" label={directionLabel} variant="outlined" />
             </Stack>
             <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.25 }}>
-              <AccessTimeIcon sx={{ fontSize: 13, color: theme.custom.textMuted }} />
-              <Typography variant="caption" sx={{ color: theme.custom.textSecondary }}>
+              <AccessTimeIcon sx={{ fontSize: 12, color: theme.custom.textMuted }} />
+              <Typography sx={{ color: theme.custom.textSecondary, fontSize: '0.68rem' }}>
                 {deadlineMs === null
                   ? 'no deadline yet'
                   : `${expired ? 'expired' : formatRemaining(deadlineMs)} · ${new Date(deadlineMs).toLocaleString()}`}
@@ -290,7 +325,7 @@ const OfferCard: React.FC<{
           </Stack>
         </Stack>
 
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
           {expired && <Chip size="small" color="error" label="Expired" />}
           {!expired && unsafe && <Chip size="small" color="warning" label="Too little time" />}
           {walletMatches && <Chip size="small" color="success" label="Your wallet" />}
@@ -303,9 +338,9 @@ const OfferCard: React.FC<{
           color="primary"
           disabled={!canTake}
           onClick={() => onTake(swap)}
-          sx={{ minWidth: 120 }}
+          sx={{ minWidth: 110, fontSize: '0.72rem' }}
         >
-          <SwapHorizIcon fontSize="small" sx={{ mr: 0.75 }} />
+          <SwapHorizIcon sx={{ fontSize: 14, mr: 0.5 }} />
           {!myBinding
             ? isForward
               ? 'Connect Cardano'
@@ -333,14 +368,14 @@ const OfferCard: React.FC<{
       )}
 
       <Typography
-        variant="caption"
         sx={{
           display: 'block',
           mt: 1.5,
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 11,
+          fontSize: '0.62rem',
           color: theme.custom.textMuted,
           wordBreak: 'break-all',
+          textTransform: 'uppercase',
+          letterSpacing: '0.02em',
         }}
       >
         Hash: {swap.hash}

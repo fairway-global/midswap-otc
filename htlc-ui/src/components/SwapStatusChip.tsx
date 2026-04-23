@@ -1,59 +1,39 @@
 /**
- * Unified status chip for orchestrator swap statuses.
- *
- * Labels are direction-neutral — the same state name has a matching semantic
- * in both `ada-usdc` and `usdc-ada` flows (e.g. `alice_claimed` = "Preimage
- * revealed" regardless of which chain did the revealing).
+ * SwapStatusChip — terminal-style uppercase status indicator.
+ * Direction-neutral vocabulary (no Alice/Bob).
  */
 
 import React from 'react';
-import { Chip, type ChipProps } from '@mui/material';
+import { Chip } from '@mui/material';
 import type { SwapStatus } from '../api/orchestrator-client';
 
-type ChipColor = NonNullable<ChipProps['color']>;
-
-interface StatusMeta {
-  label: string;
-  color: ChipColor;
-  description: string;
-}
-
-const META: Record<SwapStatus, StatusMeta> = {
-  open: { label: 'Open', color: 'info', description: 'Maker has locked — waiting for counterparty.' },
-  bob_deposited: {
-    label: 'Counterparty locked',
-    color: 'primary',
-    description: 'Both sides locked — waiting for the maker to claim.',
-  },
-  alice_claimed: {
-    label: 'Preimage revealed',
-    color: 'primary',
-    description: 'Maker claimed — preimage is public. Taker can now claim.',
-  },
-  completed: { label: 'Completed', color: 'success', description: 'Swap finished.' },
-  alice_reclaimed: {
-    label: 'Maker reclaimed',
-    color: 'warning',
-    description: 'Maker refunded their initial lock after the deadline passed.',
-  },
-  bob_reclaimed: {
-    label: 'Taker reclaimed',
-    color: 'warning',
-    description: 'Taker refunded their lock after the deadline passed.',
-  },
-  expired: { label: 'Expired', color: 'error', description: 'Past deadline — needs manual reclaim.' },
+const LABELS: Record<SwapStatus, string> = {
+  open: 'Open',
+  bob_deposited: 'Deposited',
+  alice_claimed: 'Claimed',
+  completed: 'Completed',
+  alice_reclaimed: 'Maker reclaimed',
+  bob_reclaimed: 'Taker reclaimed',
+  expired: 'Expired',
 };
 
-export const statusLabel = (s: SwapStatus): string => META[s].label;
-export const statusDescription = (s: SwapStatus): string => META[s].description;
-
-interface Props {
-  status: SwapStatus;
-  size?: ChipProps['size'];
-  variant?: ChipProps['variant'];
-}
-
-export const SwapStatusChip: React.FC<Props> = ({ status, size = 'small', variant = 'filled' }) => {
-  const meta = META[status];
-  return <Chip size={size} variant={variant} color={meta.color} label={meta.label} title={meta.description} />;
+const COLORS: Record<SwapStatus, 'primary' | 'success' | 'error' | 'warning' | 'info' | 'default'> = {
+  open: 'info',
+  bob_deposited: 'primary',
+  alice_claimed: 'warning',
+  completed: 'success',
+  alice_reclaimed: 'error',
+  bob_reclaimed: 'error',
+  expired: 'default',
 };
+
+export const statusLabel = (s: SwapStatus): string => LABELS[s] ?? s;
+
+export const SwapStatusChip: React.FC<{ status: SwapStatus }> = ({ status }) => (
+  <Chip
+    size="small"
+    label={statusLabel(status)}
+    color={COLORS[status] ?? 'default'}
+    variant="filled"
+  />
+);
