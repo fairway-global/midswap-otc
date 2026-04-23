@@ -16,6 +16,7 @@ import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { bytesToHex, hexToBytes, userEither } from '../../api/key-encoding';
 import { watchForCardanoLock, type CardanoHTLCInfo } from '../../api/cardano-watcher';
+import { watchForHTLCDeposit } from '../../api/midnight-watcher';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 
 export interface ReverseMakerLockParams {
@@ -310,17 +311,26 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         throw new Error('Connect both wallets before depositing.');
       }
       dispatch({ t: 'to-depositing' });
+
+      const preimage = randomBytes32();
+      const hashLock = await sha256(preimage);
+      const hashHex = bytesToHex(hashLock);
+      const preimageHex = bytesToHex(preimage);
+      const midnightDeadlineMs = BigInt(Date.now() + params.deadlineMin * 60 * 1000);
+      const midnightDeadlineSecs = midnightDeadlineMs / 1000n;
+      const usdcColor = hexToBytes(swapState.usdcColor);
+
+      // The Lace dApp-connector API sometimes surfaces a generic
+      // "Transaction submission error" even when the tx actually lands
+      // on-chain (the submit promise rejects after a retry-race with the
+      // indexer). Before trusting an exception, verify the HTLC entry
+      // appeared on-chain for our hash — if it did, proceed as if the submit
+      // succeeded. Only dispatch a true error state if the entry is missing
+      // after a short grace period.
+      let depositTxHash: string | undefined;
+      let submitError: unknown;
       try {
-        const preimage = randomBytes32();
-        const hashLock = await sha256(preimage);
-        const hashHex = bytesToHex(hashLock);
-        const preimageHex = bytesToHex(preimage);
-        const midnightDeadlineMs = BigInt(Date.now() + params.deadlineMin * 60 * 1000);
-        const midnightDeadlineSecs = midnightDeadlineMs / 1000n;
-
-        const usdcColor = hexToBytes(swapState.usdcColor);
-
-        const depositTxHash = await session.htlcApi.deposit({
+        depositTxHash = await session.htlcApi.deposit({
           color: usdcColor,
           amount: params.usdcAmount,
           hash: hashLock,
@@ -329,54 +339,78 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
           receiverPayout: userEither(params.counterpartyUnshieldedBytes),
           senderPayout: userEither(session.bootstrap.unshieldedAddressBytes),
         });
+      } catch (e) {
+        submitError = e;
+        console.warn('[useReverseMakerFlow:deposit] submit surfaced error; verifying on-chain', e);
+      }
 
-        savePending(session.bootstrap.coinPublicKeyHex, {
+      if (!depositTxHash) {
+        // Verify via the indexer within a 60-second window. If the deposit
+        // lands, treat as success; otherwise surface the real submit error.
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 60_000);
+          await watchForHTLCDeposit(
+            session.bootstrap.htlcProviders.publicDataProvider,
+            session.htlcApi.deployedContractAddress,
+            hashLock,
+            5_000,
+            controller.signal,
+          );
+          clearTimeout(timer);
+          toast.info('Wallet returned an error but the deposit landed on-chain — continuing.');
+        } catch {
+          const msg = describeError(submitError ?? new Error('Deposit timed out before landing.'));
+          toast.error(`Deposit failed: ${msg}`);
+          dispatch({ t: 'error', message: msg });
+          return;
+        }
+      }
+
+      savePending(session.bootstrap.coinPublicKeyHex, {
+        hashHex,
+        preimageHex,
+        midnightDeadlineMs: midnightDeadlineMs.toString(),
+        adaAmount: params.adaAmount.toString(),
+        usdcAmount: params.usdcAmount.toString(),
+      });
+
+      // Register the reverse swap with the orchestrator. bobPkh is the
+      // MAKER's own Cardano PKH — the receiver that the future taker lock
+      // will bind to. bobCpk/bobUnshielded are the TAKER's Midnight keys
+      // (known via the paste-bundle we just used as receiverAuth/payout).
+      // When the submit-wrapper failed, we don't have the deposit tx hash,
+      // but the on-chain entry is what matters — pass a hash-derived stand-in
+      // so the orchestrator record still exists for the taker to key on.
+      void tryOrchestrator(
+        () =>
+          orchestratorClient.createSwap({
+            hash: hashHex,
+            direction: 'usdc-ada',
+            aliceCpk: session.bootstrap.coinPublicKeyHex,
+            aliceUnshielded: session.bootstrap.unshieldedAddressHex,
+            adaAmount: params.adaAmount.toString(),
+            usdcAmount: params.usdcAmount.toString(),
+            midnightDeadlineMs: Number(midnightDeadlineMs),
+            midnightDepositTx: depositTxHash ?? `pending:${hashHex}`,
+            bobCpk: bytesToHex(params.counterpartyCpkBytes),
+            bobUnshielded: bytesToHex(params.counterpartyUnshieldedBytes),
+            bobPkh: cardano.paymentKeyHash,
+          }),
+        'createSwap reverse',
+      );
+
+      dispatch({
+        t: 'deposited',
+        payload: {
+          kind: 'deposited',
           hashHex,
           preimageHex,
-          midnightDeadlineMs: midnightDeadlineMs.toString(),
-          adaAmount: params.adaAmount.toString(),
-          usdcAmount: params.usdcAmount.toString(),
-        });
-
-        // Register the reverse swap with the orchestrator. bobPkh is the
-        // MAKER's own Cardano PKH — the receiver that the future taker lock
-        // will bind to. bobCpk/bobUnshielded are the TAKER's Midnight keys
-        // (known via the paste-bundle we just used as receiverAuth/payout).
-        void tryOrchestrator(
-          () =>
-            orchestratorClient.createSwap({
-              hash: hashHex,
-              direction: 'usdc-ada',
-              aliceCpk: session.bootstrap.coinPublicKeyHex,
-              aliceUnshielded: session.bootstrap.unshieldedAddressHex,
-              adaAmount: params.adaAmount.toString(),
-              usdcAmount: params.usdcAmount.toString(),
-              midnightDeadlineMs: Number(midnightDeadlineMs),
-              midnightDepositTx: depositTxHash,
-              bobCpk: bytesToHex(params.counterpartyCpkBytes),
-              bobUnshielded: bytesToHex(params.counterpartyUnshieldedBytes),
-              bobPkh: cardano.paymentKeyHash,
-            }),
-          'createSwap reverse',
-        );
-
-        dispatch({
-          t: 'deposited',
-          payload: {
-            kind: 'deposited',
-            hashHex,
-            preimageHex,
-            midnightDeadlineMs,
-            adaAmount: params.adaAmount,
-            usdcAmount: params.usdcAmount,
-          },
-        });
-      } catch (e) {
-        console.error('[useReverseMakerFlow:deposit]', e);
-        const msg = describeError(e);
-        toast.error(`Deposit failed: ${msg}`);
-        dispatch({ t: 'error', message: msg });
-      }
+          midnightDeadlineMs,
+          adaAmount: params.adaAmount,
+          usdcAmount: params.usdcAmount,
+        },
+      });
     },
     [session, cardano, swapState.usdcColor, toast],
   );

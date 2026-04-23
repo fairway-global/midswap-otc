@@ -19,28 +19,38 @@ const num = (key: string, fallback: number): number => {
 
 export const limits = {
   /** Minimum acceptable Cardano deadline (minutes) when Alice locks. */
-  aliceMinDeadlineMin: num('VITE_ALICE_MIN_DEADLINE_MIN', 3),
-  /** Default value shown in Alice's deadline input. */
-  aliceDefaultDeadlineMin: num('VITE_ALICE_DEFAULT_DEADLINE_MIN', 120),
+  aliceMinDeadlineMin: num('VITE_ALICE_MIN_DEADLINE_MIN', 10),
+  /**
+   * Default value shown in Alice's deadline input.
+   *
+   * 4 hours gives the inner taker deadline room to be a full 2 hours without
+   * being truncated by the `bobSafetyBufferSecs` floor. Users can override
+   * down to `aliceMinDeadlineMin`.
+   */
+  aliceDefaultDeadlineMin: num('VITE_ALICE_DEFAULT_DEADLINE_MIN', 240),
   /** Minimum time remaining on Alice's Cardano lock before Bob will accept. */
   bobMinCardanoWindowSecs: num('VITE_BOB_MIN_CARDANO_WINDOW_SECS', 180),
   /** Seconds of safety buffer Bob leaves inside Alice's Cardano deadline. */
   bobSafetyBufferSecs: num('VITE_BOB_SAFETY_BUFFER_SECS', 60),
-  /** Minutes Bob's Midnight deadline ideally lasts from now. */
-  bobDeadlineMin: num('VITE_BOB_DEADLINE_MIN', 2),
+  /**
+   * Minutes Bob's Midnight deadline lasts from the moment he deposits.
+   *
+   * This is the window the MAKER has to observe the deposit, click Claim,
+   * sign, and have the Midnight tx propagate. 2 hours matches a realistic
+   * "wander off and come back" user expectation. Override via VITE_BOB_DEADLINE_MIN.
+   */
+  bobDeadlineMin: num('VITE_BOB_DEADLINE_MIN', 120),
   /**
    * Minutes the reverse-flow taker's Cardano deadline lasts from now.
-   *
-   * Default is 5 minutes — longer than forward's `bobDeadlineMin` because the
-   * reverse maker's claim must land on Cardano (slower finality + script tx
-   * propagation + validTo safety margin) before this expires, unlike forward
-   * where the maker's claim lands on fast-finality Midnight.
+   * Same 2-hour target as forward — the reverse maker's claim lands on
+   * Cardano (slower finality) so if anything could use even more slack, but
+   * 2 hours is sufficient in practice.
    */
-  reverseTakerDeadlineMin: num('VITE_REVERSE_TAKER_DEADLINE_MIN', 5),
+  reverseTakerDeadlineMin: num('VITE_REVERSE_TAKER_DEADLINE_MIN', 120),
   /** Absolute floor (seconds) for Bob's deposit TTL after safety-buffer truncation. */
   bobMinDepositTtlSecs: num('VITE_BOB_MIN_DEPOSIT_TTL_SECS', 60),
   /** Browse hides offers whose deadline is within this many seconds. */
-  browseMinRemainingSecs: num('VITE_BROWSE_MIN_REMAINING_SECS', 180),
+  browseMinRemainingSecs: num('VITE_BROWSE_MIN_REMAINING_SECS', 300),
   /** Ms after the user clicks a signing button before we show "check your wallet". */
   walletPopupHintMs: num('VITE_WALLET_POPUP_HINT_MS', 3000),
 };

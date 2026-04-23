@@ -11,7 +11,7 @@ import { useCallback, useEffect, useReducer } from 'react';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { watchForCardanoLock, type CardanoHTLCInfo } from '../../api/cardano-watcher';
-import { watchForPreimageReveal } from '../../api/midnight-watcher';
+import { watchForHTLCDeposit, watchForPreimageReveal } from '../../api/midnight-watcher';
 import { bytesToHex, hexToBytes, userEither } from '../../api/key-encoding';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 import { limits } from '../../config/limits';
@@ -204,15 +204,28 @@ export const useTakerFlow = (): UseTakerFlow => {
   }, [state, cardano]);
 
   // Send the deposit tx when entering `depositing`.
+  //
+  // Resilience to the Lace dApp-connector quirk where `submitTransaction`
+  // surfaces an error even when the tx actually landed on-chain:
+  //
+  //   1. If deposit() throws, do NOT go straight to error. First verify via
+  //      the Midnight indexer whether the HTLC entry already exists for our
+  //      hash. If it does AND receiverAuth matches the maker's cpk from the
+  //      URL, treat as a successful deposit (an earlier attempt landed).
+  //   2. If the error is specifically "HTLC already active for this hash",
+  //      that's a strong signal a prior attempt succeeded — verify the entry
+  //      belongs to the right swap (our hash, right receiverAuth) and resume.
   useEffect(() => {
     if (state.kind !== 'depositing' || !session) return;
     void (async () => {
+      const hashBytes = hexToBytes(state.url.hashHex);
+      const aliceAuthBytes = hexToBytes(state.url.aliceCpkHex);
+      const aliceUnshieldedBytes = hexToBytes(state.url.aliceUnshieldedHex);
+      const bobUnshieldedBytes = session.bootstrap.unshieldedAddressBytes;
+      const usdcColor = hexToBytes(swapState.usdcColor);
+
+      let submitError: unknown;
       try {
-        const hashBytes = hexToBytes(state.url.hashHex);
-        const aliceAuthBytes = hexToBytes(state.url.aliceCpkHex);
-        const aliceUnshieldedBytes = hexToBytes(state.url.aliceUnshieldedHex);
-        const bobUnshieldedBytes = session.bootstrap.unshieldedAddressBytes;
-        const usdcColor = hexToBytes(swapState.usdcColor);
         await session.htlcApi.deposit({
           color: usdcColor,
           amount: state.url.usdcAmount,
@@ -222,24 +235,57 @@ export const useTakerFlow = (): UseTakerFlow => {
           receiverPayout: userEither(aliceUnshieldedBytes),
           senderPayout: userEither(bobUnshieldedBytes),
         });
-        void tryOrchestrator(
-          () =>
-            orchestratorClient.patchSwap(state.url.hashHex, {
-              status: 'bob_deposited',
-              bobCpk: session.bootstrap.coinPublicKeyHex,
-              bobUnshielded: session.bootstrap.unshieldedAddressHex,
-              bobPkh: cardano?.paymentKeyHash,
-              midnightDeadlineMs: Number(state.bobDeadlineSecs) * 1000,
-            }),
-          'patchSwap bob_deposited',
-        );
-        dispatch({ t: 'to-waiting-preimage' });
       } catch (e) {
-        console.error('[useTakerFlow] deposit failed', e);
-        const msg = describeError(e);
-        toast.error(`Deposit failed: ${msg}`);
-        dispatch({ t: 'error', message: msg });
+        submitError = e;
+        console.warn('[useTakerFlow] deposit submit surfaced error; verifying on-chain', e);
       }
+
+      if (submitError) {
+        // Verify whether an earlier attempt actually landed. Strictly check
+        // receiverAuth so we don't misidentify a stranger's deposit as ours.
+        let landed = false;
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 45_000);
+          const info = await watchForHTLCDeposit(
+            session.bootstrap.htlcProviders.publicDataProvider,
+            session.htlcApi.deployedContractAddress,
+            hashBytes,
+            5_000,
+            controller.signal,
+          );
+          clearTimeout(timer);
+          // Confirm the existing entry is ours by checking receiverAuth matches
+          // the maker's cpk from the URL.
+          const receiverOk = bytesToHex(info.receiverAuth) === state.url.aliceCpkHex.toLowerCase();
+          if (receiverOk) {
+            landed = true;
+          }
+        } catch {
+          /* abort = not found within window */
+        }
+
+        if (!landed) {
+          const msg = describeError(submitError);
+          toast.error(`Deposit failed: ${msg}`);
+          dispatch({ t: 'error', message: msg });
+          return;
+        }
+        toast.info('Wallet returned an error but the deposit landed on-chain — continuing.');
+      }
+
+      void tryOrchestrator(
+        () =>
+          orchestratorClient.patchSwap(state.url.hashHex, {
+            status: 'bob_deposited',
+            bobCpk: session.bootstrap.coinPublicKeyHex,
+            bobUnshielded: session.bootstrap.unshieldedAddressHex,
+            bobPkh: cardano?.paymentKeyHash,
+            midnightDeadlineMs: Number(state.bobDeadlineSecs) * 1000,
+          }),
+        'patchSwap bob_deposited',
+      );
+      dispatch({ t: 'to-waiting-preimage' });
     })();
   }, [state, session, cardano, swapState.usdcColor, toast]);
 

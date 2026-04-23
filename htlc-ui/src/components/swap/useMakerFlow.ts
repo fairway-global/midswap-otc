@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { firstValueFrom } from 'rxjs';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { bytesToHex, hexToBytes } from '../../api/key-encoding';
@@ -393,6 +394,29 @@ export const useMakerFlow = (): UseMakerFlow => {
     if (state.kind !== 'claim-ready' || !session) return;
     dispatch({ t: 'to-claiming' });
     try {
+      // Pre-flight deadline check. The contract rejects `withdrawWithPreimage`
+      // with "HTLC has expired" once `htlcExpiries[hash] <= currentTimeSecs()`.
+      // The SDK's own check uses potentially stale state — it can succeed
+      // locally while the tx lands past the deadline and reverts as a
+      // `SegmentFail`. Read the fresh entry here, bail with a clear message
+      // if the window is gone or too tight for tx propagation.
+      const derived = await firstValueFrom(session.htlcApi.state$);
+      const entry = derived.entries.get(state.hashHex);
+      if (entry) {
+        const nowSecs = Math.floor(Date.now() / 1000);
+        const remaining = Number(entry.expirySecs) - nowSecs;
+        if (remaining <= 0) {
+          throw new Error(
+            `HTLC has already expired on Midnight (${Math.abs(remaining)}s ago). The counterparty can reclaim their USDC; ask them to redeposit with a fresher deadline.`,
+          );
+        }
+        if (remaining < 20) {
+          throw new Error(
+            `HTLC deadline too close to safely submit (${remaining}s left). Submitting now risks a post-deadline rejection — ask the counterparty to redeposit with a fresher deadline.`,
+          );
+        }
+      }
+
       const preimage = hexToBytes(state.preimageHex);
       await session.htlcApi.withdrawWithPreimage(preimage);
       void tryOrchestrator(
