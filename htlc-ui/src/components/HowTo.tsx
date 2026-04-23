@@ -1,179 +1,203 @@
 /**
- * /how-to — onboarding + conceptual walkthrough.
- *
- * Meant for a first-time user who just landed here. Answers:
- *   1. What is this?
- *   2. What wallets do I need?
- *   3. What's the flow for Alice vs. Bob?
- *   4. Where does the trust come from?
- *   5. What happens if something breaks?
- *
- * Keep it prose-heavy and dependency-light — don't import the swap context,
- * this page must render even when the whole stack is down.
+ * /how — onboarding walkthrough. Generic maker/taker language (no Alice/Bob).
+ * Renders without the swap context so it loads even if the stack is down.
  */
 
 import React from 'react';
-import { Alert, Box, Card, CardContent, Chip, Divider, Link, List, ListItem, Stack, Typography } from '@mui/material';
+import { Alert, Box, Chip, Divider, Link, List, ListItem, Stack, Typography } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
 import { Link as RouterLink } from 'react-router-dom';
+import { TokenBadge } from './swap/TokenBadge';
+import { ADA, USDC } from './swap/tokens';
 
-const Step: React.FC<{ n: number; title: string; children: React.ReactNode }> = ({ n, title, children }) => (
-  <Stack direction="row" spacing={2} alignItems="flex-start">
-    <Chip label={n} color="primary" sx={{ fontWeight: 600, minWidth: 36 }} />
-    <Box sx={{ flex: 1 }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+const Step: React.FC<{ n: number; title: string; children: React.ReactNode }> = ({ n, title, children }) => {
+  const theme = useTheme();
+  return (
+    <Stack direction="row" spacing={2} alignItems="flex-start">
+      <Box
+        sx={{
+          minWidth: 32,
+          height: 32,
+          borderRadius: '50%',
+          bgcolor: alpha(theme.custom.cardanoBlue, 0.15),
+          color: theme.custom.cardanoBlue,
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '0.9rem',
+        }}
+      >
+        {n}
+      </Box>
+      <Box sx={{ flex: 1 }}>
+        <Typography sx={{ fontWeight: 600, mb: 0.5 }}>{title}</Typography>
+        <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
+          {children}
+        </Typography>
+      </Box>
+    </Stack>
+  );
+};
+
+const SectionCard: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
+  const theme = useTheme();
+  return (
+    <Box
+      sx={{
+        p: 3,
+        borderRadius: 4,
+        border: `1px solid ${theme.custom.borderSubtle}`,
+        bgcolor: theme.custom.surface1,
+      }}
+    >
+      <Typography variant="h5" sx={{ mb: 2 }}>
         {title}
       </Typography>
-      <Typography variant="body2" color="text.secondary">
-        {children}
-      </Typography>
+      {children}
     </Box>
-  </Stack>
-);
+  );
+};
 
-export const HowTo: React.FC = () => (
-  <Stack spacing={3} sx={{ width: '100%', maxWidth: 860 }}>
-    <Typography variant="h3">How the atomic swap works</Typography>
-    <Typography variant="body1" color="text.secondary">
-      Trade ADA on Cardano ↔ native USDC on Midnight, without trusting a counterparty or a custodian. Escrow is
-      hash-time-locked on both chains; if either side times out the funds reclaim back to the original sender.
-    </Typography>
+export const HowTo: React.FC = () => {
+  const theme = useTheme();
+  return (
+    <Stack spacing={3} sx={{ width: '100%', maxWidth: 880, mx: 'auto' }}>
+      <Stack spacing={1} alignItems="center" sx={{ textAlign: 'center' }}>
+        <Chip
+          label="Protocol"
+          size="small"
+          sx={{
+            bgcolor: alpha(theme.custom.cardanoBlue, 0.15),
+            color: theme.custom.cardanoBlue,
+            fontWeight: 500,
+          }}
+        />
+        <Typography variant="h3">How Midswap works</Typography>
+        <Typography sx={{ color: theme.custom.textSecondary, maxWidth: 640 }}>
+          Trade ADA on Cardano ↔ native USDC on Midnight without trusting a counterparty or a custodian. Hash-time-lock
+          escrow on both chains guarantees either both sides settle or both sides reclaim.
+        </Typography>
+      </Stack>
 
-    <Card>
-      <CardContent>
-        <Stack spacing={2}>
-          <Typography variant="h5">1. What you&apos;ll need</Typography>
-          <List dense disablePadding>
-            <ListItem>
-              <Typography variant="body2">
-                <strong>Midnight wallet:</strong>{' '}
-                <Link
-                  href="https://docs.midnight.network/develop/tutorial/building/prereqs"
-                  target="_blank"
-                  rel="noopener"
-                >
-                  Install Lace (Midnight)
-                </Link>{' '}
-                + some tNight for fees (get from the{' '}
-                <Link href="https://faucet.preprod.midnight.network/" target="_blank" rel="noopener">
-                  preprod faucet
-                </Link>
-                ). Dust sync can take ~15 minutes — start early.
-              </Typography>
-            </ListItem>
-            <ListItem>
-              <Typography variant="body2">
-                <strong>Cardano wallet:</strong>{' '}
-                <Link href="https://eternl.io" target="_blank" rel="noopener">
-                  Install Eternl
-                </Link>{' '}
-                configured for the <em>Preprod</em> network, plus ADA from the{' '}
-                <Link href="https://docs.cardano.org/cardano-testnets/tools/faucet" target="_blank" rel="noopener">
-                  Cardano preprod faucet
-                </Link>
-                .
-              </Typography>
-            </ListItem>
-            <ListItem>
-              <Typography variant="body2">
-                <strong>For Bob only:</strong> native USDC in your 1AM wallet before starting. Mint some on the{' '}
-                <RouterLink to="/mint-usdc">/mint-usdc</RouterLink> page — it only takes one signature.
-              </Typography>
-            </ListItem>
-          </List>
-        </Stack>
-      </CardContent>
-    </Card>
+      <SectionCard title="What you'll need">
+        <List dense disablePadding>
+          <ListItem sx={{ px: 0 }}>
+            <Typography variant="body2">
+              <strong>Midnight wallet.</strong>{' '}
+              <Link href="https://docs.midnight.network/develop/tutorial/building/prereqs" target="_blank" rel="noopener">
+                Install Lace for Midnight
+              </Link>{' '}
+              + some tNight for fees. Grab from the{' '}
+              <Link href="https://faucet.preprod.midnight.network/" target="_blank" rel="noopener">
+                preprod faucet
+              </Link>
+              . Dust sync can take ~15 minutes the first time.
+            </Typography>
+          </ListItem>
+          <ListItem sx={{ px: 0 }}>
+            <Typography variant="body2">
+              <strong>Cardano wallet.</strong>{' '}
+              <Link href="https://eternl.io" target="_blank" rel="noopener">
+                Install Eternl
+              </Link>{' '}
+              configured for the <em>Preprod</em> network, plus ADA from the{' '}
+              <Link href="https://docs.cardano.org/cardano-testnets/tools/faucet" target="_blank" rel="noopener">
+                Cardano preprod faucet
+              </Link>
+              .
+            </Typography>
+          </ListItem>
+          <ListItem sx={{ px: 0 }}>
+            <Typography variant="body2">
+              <strong>For takers:</strong> native USDC in your Midnight wallet before starting. Use the{' '}
+              <RouterLink to="/mint" style={{ color: theme.custom.cardanoBlue }}>
+                Mint USDC
+              </RouterLink>{' '}
+              page — one signature is enough.
+            </Typography>
+          </ListItem>
+        </List>
+      </SectionCard>
 
-    <Card>
-      <CardContent>
-        <Stack spacing={2}>
-          <Typography variant="h5">2. Alice&apos;s side — lock ADA, claim USDC</Typography>
-          <Step n={1} title="Generate a secret preimage">
-            Alice&apos;s browser generates a random 32-byte preimage and computes its SHA-256 hash. Only the hash is
-            ever shared with anyone — the preimage stays in her browser.
+      <SectionCard title="Making an offer (you have ADA, want USDC)">
+        <Stack spacing={2.5}>
+          <Step n={1} title="Set the amounts and the counterparty">
+            Enter how much ADA you&apos;re willing to lock and how much USDC you want in return. Paste your
+            counterparty&apos;s Cardano address or 56-hex payment key hash — this binds the lock to their wallet on-chain.
           </Step>
           <Step n={2} title="Lock ADA on Cardano">
-            One Eternl signature posts an HTLC UTxO to the Cardano validator. The UTxO is bound to Bob&apos;s Cardano
-            PKH and the hash; only Bob can claim, and only with a matching preimage.
+            One Eternl signature posts an HTLC UTxO. Only the counterparty can claim, and only with the secret preimage
+            you hold.
           </Step>
           <Step n={3} title="Share the offer">
-            Alice sends Bob a share URL (or QR code) with the hash + her Midnight keys + the deadline. The offer also
-            appears on <RouterLink to="/browse">/browse</RouterLink> so any Bob with the right wallet can find it.
+            Midswap shows a share URL + QR. Send it over any channel — it embeds every value the counterparty needs.
           </Step>
-          <Step n={4} title="Wait for Bob's deposit">
-            The page watches Midnight for a matching USDC deposit. As soon as Bob&apos;s transaction finalizes, the
-            &quot;Claim USDC&quot; button unlocks.
+          <Step n={4} title="Watch for the deposit">
+            We scan Midnight for the counterparty&apos;s USDC deposit. When it lands, your claim button unlocks.
           </Step>
-          <Step n={5} title="Claim USDC (reveals the preimage)">
-            One 1AM signature calls <code>withdrawWithPreimage</code>. The circuit records the preimage in the
-            HTLC&apos;s <code>revealedPreimages</code> map — public, but harmless: it can only unlock the swap
-            they&apos;re already party to.
+          <Step n={5} title="Claim USDC on Midnight (reveals the preimage)">
+            One signature calls <code>withdrawWithPreimage</code>. The circuit records the preimage publicly so the
+            counterparty can complete their side on Cardano.
           </Step>
         </Stack>
-      </CardContent>
-    </Card>
+      </SectionCard>
 
-    <Card>
-      <CardContent>
-        <Stack spacing={2}>
-          <Typography variant="h5">3. Bob&apos;s side — deposit USDC, claim ADA</Typography>
-          <Step n={1} title="Open Alice's offer">
-            Either click her share URL or pick the offer from <RouterLink to="/browse">/browse</RouterLink>. The page
-            auto-fills the hash, her keys, and the deadline.
+      <SectionCard title="Taking an offer (you have USDC, want ADA)">
+        <Stack spacing={2.5}>
+          <Step n={1} title="Open the offer URL (or use Browse)">
+            Paste the maker&apos;s share URL or pick an offer from{' '}
+            <RouterLink to="/browse" style={{ color: theme.custom.cardanoBlue }}>
+              Browse
+            </RouterLink>
+            . Midswap fills in the hash, amounts, and deadline for you.
           </Step>
-          <Step n={2} title="Verify the Cardano lock">
-            The page watches Cardano for Alice&apos;s HTLC UTxO, filtered by hash + his PKH. If the deadline is too
-            close or already gone, the page aborts and tells him why.
+          <Step n={2} title="Verify the lock and deadline">
+            We confirm the lock exists on Cardano and is bound to your wallet. If the deadline is too tight, we abort
+            and tell you why.
           </Step>
           <Step n={3} title="Deposit USDC on Midnight">
-            One 1AM signature calls <code>htlc.deposit</code> with a deadline strictly inside Alice&apos;s. His USDC is
-            now escrowed.
+            One signature calls <code>htlc.deposit</code> with a deadline strictly inside the maker&apos;s. Your USDC is
+            escrowed.
           </Step>
           <Step n={4} title="Wait for the preimage">
-            The page watches Midnight for Alice&apos;s reveal. Usually fast — a few seconds to a minute.
+            Once the maker claims their USDC, the preimage is published on Midnight. Midswap races the indexer and the
+            orchestrator to surface it as soon as possible.
           </Step>
           <Step n={5} title="Claim ADA on Cardano">
-            With the preimage now public, one Eternl signature spends Alice&apos;s HTLC UTxO. Swap complete.
+            One signature spends the maker&apos;s HTLC UTxO with the preimage. Swap complete.
           </Step>
         </Stack>
-      </CardContent>
-    </Card>
+      </SectionCard>
 
-    <Card>
-      <CardContent>
-        <Stack spacing={2}>
-          <Typography variant="h5">4. What about failures?</Typography>
-          <Typography variant="body2">
-            Neither side can steal funds — the worst case is time-out, and funds reclaim to the original sender. If Bob
-            never deposits, Alice&apos;s ADA is refundable after her Cardano deadline. If Alice never reveals,
-            Bob&apos;s USDC is refundable after his Midnight deadline (which is always strictly earlier).
-          </Typography>
-          <Alert severity="info">
-            Visit <RouterLink to="/reclaim">/reclaim</RouterLink> any time — the page lists reclaimable swaps for your
-            connected wallet and submits the recovery transaction with one click.
-          </Alert>
-        </Stack>
-      </CardContent>
-    </Card>
+      <SectionCard title="If something goes wrong">
+        <Typography variant="body2" sx={{ color: theme.custom.textSecondary, mb: 1.5 }}>
+          No one can steal your funds — the worst case is a timeout, and funds reclaim to the original sender.
+        </Typography>
+        <Alert severity="info">
+          Visit{' '}
+          <RouterLink to="/reclaim" style={{ color: theme.custom.cardanoBlue }}>
+            Reclaim
+          </RouterLink>{' '}
+          — the page lists refundable swaps for your connected wallet and submits the recovery in one click.
+        </Alert>
+      </SectionCard>
 
-    <Card>
-      <CardContent>
-        <Stack spacing={2}>
-          <Typography variant="h5">5. Where does the trust come from?</Typography>
-          <Typography variant="body2">
-            Nowhere — that&apos;s the point. The SHA-256 hash is the atomic link: revealing the preimage to claim USDC
-            on Midnight publishes it on-chain, and Bob&apos;s Cardano claim requires the same preimage. The two
-            deadlines are staggered (Alice&apos;s always ≥ 5 minutes longer than Bob&apos;s) so if the preimage goes
-            stale the loser is whoever didn&apos;t act in time — not whoever got defrauded.
-          </Typography>
-          <Divider />
-          <Typography variant="body2">
-            The <RouterLink to="/dashboard">/dashboard</RouterLink> page shows the live state of every swap tracked by
-            the orchestrator — open offers, in-flight swaps, completed ones. It&apos;s purely informational: chain state
-            is always authoritative.
-          </Typography>
+      <SectionCard title="Where does the trust come from?">
+        <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
+          Nowhere. SHA-256 is the atomic link: revealing the preimage to claim USDC on Midnight publishes it on-chain;
+          claiming ADA on Cardano requires the same preimage. Deadlines are staggered — the taker side always expires
+          first — so whoever doesn&apos;t act in time can reclaim without anyone losing funds.
+        </Typography>
+        <Divider sx={{ my: 2 }} />
+        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+          <TokenBadge token={ADA} size={28} />
+          <Typography variant="body2">Aiken validator on Cardano</Typography>
+          <Box sx={{ mx: 1 }}>·</Box>
+          <TokenBadge token={USDC} size={28} />
+          <Typography variant="body2">Compact circuit on Midnight</Typography>
         </Stack>
-      </CardContent>
-    </Card>
-  </Stack>
-);
+      </SectionCard>
+    </Stack>
+  );
+};

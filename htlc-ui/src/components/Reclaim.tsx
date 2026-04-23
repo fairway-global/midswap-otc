@@ -1,15 +1,13 @@
 /**
- * Reclaim panel — list-driven, powered by the orchestrator DB.
+ * /reclaim — list-driven refund panel powered by the orchestrator.
  *
- *   • "Reclaim ADA"  — open/bob_deposited swaps where you are Alice (sender
- *                      of the Cardano lock) AND the Cardano deadline has
- *                      passed. One-click per row — calls Cardano reclaim.
- *   • "Reclaim USDC" — bob_deposited swaps where you are Bob AND the Midnight
- *                      deadline has passed. One-click per row — calls the
- *                      HTLC `reclaimAfterExpiry` circuit.
+ *   • Reclaim ADA on Cardano — for swaps where you locked ADA and the maker
+ *     deadline has passed. Handles open + bob_deposited states.
+ *   • Reclaim USDC on Midnight — for swaps where you deposited USDC and the
+ *     taker deadline has passed.
  *
- * A manual "by hash" fallback remains for swaps that never hit the DB (e.g.
- * CLI-only runs), hidden behind a toggle so the common case is zero-input.
+ * A manual "by hash" fallback is provided for swaps not tracked by the
+ * orchestrator (e.g. CLI runs), hidden behind a toggle.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -17,24 +15,28 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
   CircularProgress,
   Collapse,
   Divider,
+  IconButton,
+  Skeleton,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import PaidIcon from '@mui/icons-material/Paid';
+import { alpha, useTheme } from '@mui/material/styles';
 import { useSearchParams } from 'react-router-dom';
 import { firstValueFrom } from 'rxjs';
 import { useSwapContext } from '../hooks';
-import { WalletConnect } from './WalletConnect';
 import { hexToBytes } from '../api/key-encoding';
 import { orchestratorClient, type Swap } from '../api/orchestrator-client';
 import { SwapStatusChip } from './SwapStatusChip';
+import { TokenBadge } from './swap/TokenBadge';
+import { ADA, USDC } from './swap/tokens';
 
 type RowStatus =
   | { kind: 'idle' }
@@ -72,6 +74,7 @@ const formatAgo = (deadlineMs: number): string => {
 
 export const Reclaim: React.FC = () => {
   const [searchParams] = useSearchParams();
+  const theme = useTheme();
   const { session, cardano } = useSwapContext();
   const [swaps, setSwaps] = useState<Swap[] | undefined>(undefined);
   const [listError, setListError] = useState<string | undefined>(undefined);
@@ -81,7 +84,6 @@ export const Reclaim: React.FC = () => {
   const [showManual, setShowManual] = useState(false);
 
   const myCpk = session?.bootstrap.coinPublicKeyHex?.toLowerCase();
-  const myPkh = cardano?.paymentKeyHash?.toLowerCase();
 
   const setRow = useCallback((hash: string, s: RowStatus): void => {
     setRowStatuses((prev) => {
@@ -136,13 +138,13 @@ export const Reclaim: React.FC = () => {
   const reclaimAdaRow = useCallback(
     async (swap: Swap): Promise<void> => {
       if (!cardano) {
-        setRow(swap.hash, { kind: 'error', message: 'Connect Eternl first.' });
+        setRow(swap.hash, { kind: 'error', message: 'Connect your Cardano wallet first.' });
         return;
       }
       setRow(swap.hash, { kind: 'submitting' });
       try {
         const txHash = await cardano.cardanoHtlc.reclaim(swap.hash);
-        setRow(swap.hash, { kind: 'done', detail: `Tx: ${txHash.slice(0, 32)}…` });
+        setRow(swap.hash, { kind: 'done', detail: `Tx ${txHash.slice(0, 16)}…` });
         void refresh();
       } catch (e) {
         setRow(swap.hash, { kind: 'error', message: e instanceof Error ? e.message : String(e) });
@@ -154,7 +156,7 @@ export const Reclaim: React.FC = () => {
   const reclaimUsdcRow = useCallback(
     async (swap: Swap): Promise<void> => {
       if (!session) {
-        setRow(swap.hash, { kind: 'error', message: 'Connect Lace first.' });
+        setRow(swap.hash, { kind: 'error', message: 'Connect your Midnight wallet first.' });
         return;
       }
       setRow(swap.hash, { kind: 'submitting' });
@@ -169,7 +171,7 @@ export const Reclaim: React.FC = () => {
     [session, refresh, setRow],
   );
 
-  // --- Manual "by hash" fallback (legacy flow, kept for CLI-only swaps) -----
+  // --- Manual "by hash" fallback (for CLI-only swaps) ---------------------
 
   const prefillHash = (searchParams.get('hash') ?? '').trim().toLowerCase();
   const [hashInput, setHashInput] = useState<string>(prefillHash);
@@ -182,7 +184,6 @@ export const Reclaim: React.FC = () => {
     setUsdcStatus({ kind: 'idle' });
   }, [hashInput]);
 
-  // Auto-expand manual panel if the URL has a ?hash= param.
   useEffect(() => {
     if (prefillHash) setShowManual(true);
   }, [prefillHash]);
@@ -192,16 +193,10 @@ export const Reclaim: React.FC = () => {
     setAdaStatus({ kind: 'inspecting' });
     try {
       const utxo = await cardano.cardanoHtlc.findHTLCUtxo(hashInput);
-      if (!utxo) {
-        setAdaStatus({ kind: 'not-found' });
-        return;
-      }
+      if (!utxo) return setAdaStatus({ kind: 'not-found' });
       const htlcs = await cardano.cardanoHtlc.listHTLCs();
       const found = htlcs.find((h) => h.datum.preimageHash === hashInput);
-      if (!found) {
-        setAdaStatus({ kind: 'not-found' });
-        return;
-      }
+      if (!found) return setAdaStatus({ kind: 'not-found' });
       setAdaStatus({
         kind: 'found',
         lovelace: utxo.assets.lovelace ?? 0n,
@@ -259,335 +254,353 @@ export const Reclaim: React.FC = () => {
     }
   }, [session, hashInput, usdcStatus, refresh]);
 
-  // --- render ---------------------------------------------------------------
-
-  const needsLace = !session;
-  const needsEternl = !cardano;
-
-  const renderRowActionAda = (swap: Swap): React.ReactNode => {
-    const rs = rowStatuses.get(swap.hash) ?? { kind: 'idle' };
-    if (rs.kind === 'submitting') {
-      return (
-        <Stack direction="row" spacing={1} alignItems="center">
-          <CircularProgress size={16} />
-          <Typography variant="body2">Submitting. Please sign in Eternl.</Typography>
-        </Stack>
-      );
-    }
-    if (rs.kind === 'done') {
-      return <Alert severity="success">Reclaim submitted. {rs.detail ?? ''}</Alert>;
-    }
-    if (rs.kind === 'error') {
-      return <Alert severity="error">{rs.message}</Alert>;
-    }
-    return (
-      <Button variant="contained" color="warning" onClick={() => void reclaimAdaRow(swap)} disabled={!cardano}>
-        Reclaim ADA
-      </Button>
-    );
-  };
-
-  const renderRowActionUsdc = (swap: Swap): React.ReactNode => {
-    const rs = rowStatuses.get(swap.hash) ?? { kind: 'idle' };
-    if (rs.kind === 'submitting') {
-      return (
-        <Stack direction="row" spacing={1} alignItems="center">
-          <CircularProgress size={16} />
-          <Typography variant="body2">Submitting. Please sign in Lace.</Typography>
-        </Stack>
-      );
-    }
-    if (rs.kind === 'done') {
-      return <Alert severity="success">{rs.detail ?? 'Reclaim submitted.'}</Alert>;
-    }
-    if (rs.kind === 'error') {
-      return <Alert severity="error">{rs.message}</Alert>;
-    }
-    return (
-      <Button variant="contained" color="warning" onClick={() => void reclaimUsdcRow(swap)} disabled={!session}>
-        Reclaim USDC
-      </Button>
-    );
-  };
+  const totalReclaimable = adaReclaimable.length + usdcReclaimable.length;
 
   return (
-    <Stack spacing={3} sx={{ width: '100%', maxWidth: 780 }}>
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Typography variant="h4" sx={{ flex: 1 }}>
-          Reclaim stuck funds
-        </Typography>
-        <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => void refresh()} disabled={loading}>
-          Refresh
-        </Button>
+    <Stack spacing={3} sx={{ width: '100%', maxWidth: 860, mx: 'auto' }}>
+      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+        <Stack spacing={0.25} sx={{ flex: 1, minWidth: 220 }}>
+          <Typography variant="h4">Reclaim</Typography>
+          <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
+            Swaps past their deadline that your connected wallet can refund.
+          </Typography>
+        </Stack>
+        <Tooltip title="Refresh">
+          <IconButton onClick={() => void refresh()} disabled={loading}>
+            <RefreshIcon />
+          </IconButton>
+        </Tooltip>
       </Stack>
 
-      <Alert severity="info">
-        Swaps are loaded from the orchestrator. Anything below is already past its deadline and eligible for reclaim by
-        your connected wallet. Alice reclaims ADA on Cardano; Bob reclaims USDC on Midnight.
-      </Alert>
-
-      <WalletConnect />
-
-      {(needsLace || needsEternl) && (
-        <Alert severity="warning">
-          Connect {needsLace && 'Lace'}
-          {needsLace && needsEternl && ' and '}
-          {needsEternl && 'Eternl'} to identify swaps you can reclaim.
-        </Alert>
+      {!(session || cardano) && (
+        <Alert severity="info">Connect at least one wallet — Midswap uses your wallet to identify refunds.</Alert>
       )}
 
       {listError && (
         <Alert severity="error">
           Orchestrator unreachable: {listError}
-          <Box sx={{ mt: 1 }}>
-            <Typography variant="caption">
-              Is it running? <code>cd htlc-orchestrator &amp;&amp; npm run dev</code>
-            </Typography>
-          </Box>
+          <Typography variant="caption" component="div" sx={{ mt: 0.5, opacity: 0.75 }}>
+            Start it: <code>cd htlc-orchestrator &amp;&amp; npm run dev</code>
+          </Typography>
         </Alert>
       )}
 
-      {/* --- Alice: reclaim ADA --------------------------------------------- */}
-      <Card>
-        <CardContent>
-          <Stack spacing={2}>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography variant="h6">Alice — reclaim ADA on Cardano</Typography>
-              <Chip size="small" label={`${adaReclaimable.length} eligible`} />
-            </Stack>
+      {loading && !swaps && (
+        <Stack spacing={1.5}>
+          {[0, 1].map((i) => (
+            <Skeleton key={i} variant="rounded" height={100} sx={{ borderRadius: 4 }} />
+          ))}
+        </Stack>
+      )}
 
-            {!session && <Typography variant="body2">Connect Lace to see your Alice-role swaps.</Typography>}
+      {swaps && totalReclaimable === 0 && !loading && (
+        <Box
+          sx={{
+            p: 6,
+            borderRadius: 4,
+            border: `1px dashed ${theme.custom.borderSubtle}`,
+            bgcolor: theme.custom.surface1,
+            textAlign: 'center',
+          }}
+        >
+          <PaidIcon sx={{ fontSize: 44, color: theme.custom.success, mb: 1 }} />
+          <Typography sx={{ fontWeight: 600, mb: 0.5 }}>Nothing to reclaim</Typography>
+          <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
+            No swaps of yours have expired. You&apos;re good.
+          </Typography>
+        </Box>
+      )}
 
-            {session && adaReclaimable.length === 0 && !loading && (
-              <Typography variant="body2" sx={{ opacity: 0.7 }}>
-                No expired ADA locks waiting on you.
-              </Typography>
-            )}
+      {/* ADA reclaim section */}
+      {adaReclaimable.length > 0 && (
+        <Section
+          icon={<TokenBadge token={ADA} size={28} />}
+          title="Refund ADA on Cardano"
+          subtitle="Locks you made whose maker-side deadline has elapsed."
+          count={adaReclaimable.length}
+        >
+          {adaReclaimable.map((swap) => (
+            <ReclaimRow
+              key={swap.hash}
+              swap={swap}
+              rowStatus={rowStatuses.get(swap.hash) ?? { kind: 'idle' }}
+              side="ada"
+              onReclaim={() => void reclaimAdaRow(swap)}
+              disabled={!cardano}
+              disabledReason="Connect Cardano wallet"
+            />
+          ))}
+        </Section>
+      )}
 
-            {adaReclaimable.map((swap) => (
-              <Card key={swap.hash} variant="outlined">
-                <CardContent>
-                  <Stack spacing={1}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Typography variant="subtitle1">
-                        {swap.adaAmount} ADA ⇄ {swap.usdcAmount} USDC
-                      </Typography>
-                      <Chip size="small" color="error" label={`expired ${formatAgo(swap.cardanoDeadlineMs)}`} />
-                      <SwapStatusChip status={swap.status} />
-                    </Stack>
-                    <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>
-                      Hash: {swap.hash.slice(0, 32)}…
-                    </Typography>
-                    <Typography variant="caption">
-                      Cardano deadline: {new Date(swap.cardanoDeadlineMs).toISOString()}
-                    </Typography>
-                    {myPkh && swap.bobPkh && swap.bobPkh.toLowerCase() === myPkh && (
-                      <Typography variant="caption" sx={{ opacity: 0.6 }}>
-                        (self-test: bobPkh matches your own PKH)
-                      </Typography>
-                    )}
-                    <Box sx={{ mt: 1 }}>{renderRowActionAda(swap)}</Box>
-                  </Stack>
-                </CardContent>
-              </Card>
-            ))}
-          </Stack>
-        </CardContent>
-      </Card>
+      {/* USDC reclaim section */}
+      {usdcReclaimable.length > 0 && (
+        <Section
+          icon={<TokenBadge token={USDC} size={28} />}
+          title="Refund USDC on Midnight"
+          subtitle="Deposits you made whose taker-side deadline has elapsed."
+          count={usdcReclaimable.length}
+        >
+          {usdcReclaimable.map((swap) => (
+            <ReclaimRow
+              key={swap.hash}
+              swap={swap}
+              rowStatus={rowStatuses.get(swap.hash) ?? { kind: 'idle' }}
+              side="usdc"
+              onReclaim={() => void reclaimUsdcRow(swap)}
+              disabled={!session}
+              disabledReason="Connect Midnight wallet"
+            />
+          ))}
+        </Section>
+      )}
 
-      {/* --- Bob: reclaim USDC ---------------------------------------------- */}
-      <Card>
-        <CardContent>
-          <Stack spacing={2}>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography variant="h6">Bob — reclaim USDC on Midnight</Typography>
-              <Chip size="small" label={`${usdcReclaimable.length} eligible`} />
-            </Stack>
-
-            {!session && <Typography variant="body2">Connect Lace to see your Bob-role swaps.</Typography>}
-
-            {session && usdcReclaimable.length === 0 && !loading && (
-              <Typography variant="body2" sx={{ opacity: 0.7 }}>
-                No expired USDC deposits waiting on you.
-              </Typography>
-            )}
-
-            {usdcReclaimable.map((swap) => (
-              <Card key={swap.hash} variant="outlined">
-                <CardContent>
-                  <Stack spacing={1}>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Typography variant="subtitle1">
-                        {swap.usdcAmount} USDC ⇄ {swap.adaAmount} ADA
-                      </Typography>
-                      <Chip size="small" color="error" label={`expired ${formatAgo(swap.midnightDeadlineMs ?? 0)}`} />
-                      <SwapStatusChip status={swap.status} />
-                    </Stack>
-                    <Typography variant="caption" sx={{ wordBreak: 'break-all' }}>
-                      Hash: {swap.hash.slice(0, 32)}…
-                    </Typography>
-                    <Typography variant="caption">
-                      Midnight deadline: {new Date(swap.midnightDeadlineMs ?? 0).toISOString()}
-                    </Typography>
-                    <Box sx={{ mt: 1 }}>{renderRowActionUsdc(swap)}</Box>
-                  </Stack>
-                </CardContent>
-              </Card>
-            ))}
-          </Stack>
-        </CardContent>
-      </Card>
-
-      {/* --- Manual fallback ------------------------------------------------ */}
-      <Divider />
+      {/* Manual fallback */}
+      <Divider sx={{ my: 1 }} />
       <Button variant="text" onClick={() => setShowManual((v) => !v)} sx={{ alignSelf: 'flex-start' }}>
-        {showManual ? 'Hide' : 'Show'} manual reclaim by hash (advanced)
+        {showManual ? 'Hide' : 'Show'} manual reclaim by hash
       </Button>
       <Collapse in={showManual}>
         <Stack spacing={2}>
           <Alert severity="info">
-            Use this only for swaps not tracked by the orchestrator (e.g., CLI-only runs). Paste the 32-byte swap hash
-            as 64 hex chars.
+            For swaps not tracked by the orchestrator (e.g. CLI-only runs). Paste the 32-byte hash as 64 hex chars.
           </Alert>
 
-          <Card>
-            <CardContent>
-              <TextField
-                label="Swap hash"
-                value={hashInput}
-                onChange={(e) => setHashInput(e.target.value.trim().toLowerCase())}
-                placeholder="64 hex characters"
-                fullWidth
-                error={!!hashInput && !hashValid}
-                helperText={!hashInput ? '' : hashValid ? '' : 'Must be exactly 64 hex chars'}
-              />
-            </CardContent>
-          </Card>
+          <Box
+            sx={{
+              p: 2.5,
+              borderRadius: 4,
+              border: `1px solid ${theme.custom.borderSubtle}`,
+              bgcolor: theme.custom.surface1,
+            }}
+          >
+            <TextField
+              label="Swap hash"
+              value={hashInput}
+              onChange={(e) => setHashInput(e.target.value.trim().toLowerCase())}
+              placeholder="64 hex characters"
+              fullWidth
+              error={!!hashInput && !hashValid}
+              helperText={!hashInput ? '' : hashValid ? '' : 'Must be exactly 64 hex chars'}
+            />
+          </Box>
 
-          <Card>
-            <CardContent>
-              <Stack spacing={2}>
-                <Typography variant="h6">Alice — reclaim ADA on Cardano</Typography>
-                <Button
-                  variant="outlined"
-                  onClick={() => void manualInspectAda()}
-                  disabled={
-                    !cardano || !hashValid || adaStatus.kind === 'inspecting' || adaStatus.kind === 'reclaiming'
-                  }
-                >
-                  Check Cardano HTLC
-                </Button>
-                {adaStatus.kind === 'inspecting' && (
-                  <Stack direction="row" spacing={2} alignItems="center">
-                    <CircularProgress size={20} />
-                    <Typography>Querying Blockfrost…</Typography>
-                  </Stack>
-                )}
+          <ManualChainPanel
+            title="Cardano HTLC — refund ADA"
+            onInspect={() => void manualInspectAda()}
+            onReclaim={() => void manualReclaimAda()}
+            disabledInspect={!cardano || !hashValid || adaStatus.kind === 'inspecting' || adaStatus.kind === 'reclaiming'}
+            body={
+              <>
+                {adaStatus.kind === 'inspecting' && <InlineBusy label="Querying Blockfrost…" />}
                 {adaStatus.kind === 'not-found' && (
-                  <Alert severity="warning">
-                    No Cardano HTLC UTxO found for this hash. It may already have been claimed or reclaimed.
-                  </Alert>
+                  <Alert severity="warning">No Cardano HTLC UTxO for this hash. It may already have settled.</Alert>
                 )}
                 {adaStatus.kind === 'found' && (
-                  <Stack spacing={1}>
+                  <Stack spacing={0.5}>
                     <Typography>Amount locked: {(Number(adaStatus.lovelace) / 1e6).toString()} ADA</Typography>
-                    <Typography>Deadline: {new Date(Number(adaStatus.deadlineMs)).toISOString()}</Typography>
+                    <Typography>Deadline: {new Date(Number(adaStatus.deadlineMs)).toLocaleString()}</Typography>
                     {adaStatus.expired ? (
                       <Alert severity="success">Deadline has passed — eligible for reclaim.</Alert>
                     ) : (
                       <Alert severity="warning">
-                        Deadline has not yet passed ({Math.ceil((Number(adaStatus.deadlineMs) - Date.now()) / 60000)}{' '}
-                        min remaining).
+                        Deadline not yet reached (~
+                        {Math.ceil((Number(adaStatus.deadlineMs) - Date.now()) / 60000)} min remaining).
                       </Alert>
                     )}
-                    <Button
-                      variant="contained"
-                      color="warning"
-                      onClick={() => void manualReclaimAda()}
-                      disabled={!adaStatus.expired}
-                    >
-                      Reclaim ADA
-                    </Button>
                   </Stack>
                 )}
-                {adaStatus.kind === 'reclaiming' && (
-                  <Stack direction="row" spacing={2} alignItems="center">
-                    <CircularProgress size={20} />
-                    <Typography>Submitting reclaim. Please sign in Eternl.</Typography>
-                  </Stack>
-                )}
+                {adaStatus.kind === 'reclaiming' && <InlineBusy label="Submitting reclaim. Sign in Cardano wallet." />}
                 {adaStatus.kind === 'done' && (
                   <Alert severity="success">
-                    Reclaimed {(Number(adaStatus.lovelace) / 1e6).toString()} ADA. Tx: {adaStatus.txHash.slice(0, 32)}…
+                    Reclaimed {(Number(adaStatus.lovelace) / 1e6).toString()} ADA. Tx {adaStatus.txHash.slice(0, 24)}…
                   </Alert>
                 )}
                 {adaStatus.kind === 'error' && <Alert severity="error">{adaStatus.message}</Alert>}
-              </Stack>
-            </CardContent>
-          </Card>
+              </>
+            }
+            canReclaim={adaStatus.kind === 'found' && adaStatus.expired}
+          />
 
-          <Card>
-            <CardContent>
-              <Stack spacing={2}>
-                <Typography variant="h6">Bob — reclaim USDC on Midnight</Typography>
-                <Button
-                  variant="outlined"
-                  onClick={() => void manualInspectUsdc()}
-                  disabled={
-                    !session || !hashValid || usdcStatus.kind === 'inspecting' || usdcStatus.kind === 'reclaiming'
-                  }
-                >
-                  Check Midnight HTLC
-                </Button>
-                {usdcStatus.kind === 'inspecting' && (
-                  <Stack direction="row" spacing={2} alignItems="center">
-                    <CircularProgress size={20} />
-                    <Typography>Reading contract state…</Typography>
-                  </Stack>
-                )}
+          <ManualChainPanel
+            title="Midnight HTLC — refund USDC"
+            onInspect={() => void manualInspectUsdc()}
+            onReclaim={() => void manualReclaimUsdc()}
+            disabledInspect={!session || !hashValid || usdcStatus.kind === 'inspecting' || usdcStatus.kind === 'reclaiming'}
+            body={
+              <>
+                {usdcStatus.kind === 'inspecting' && <InlineBusy label="Reading contract state…" />}
                 {usdcStatus.kind === 'not-found' && <Alert severity="warning">No HTLC entry for this hash.</Alert>}
                 {usdcStatus.kind === 'already-completed' && (
-                  <Alert severity="info">
-                    This swap has already completed (htlcAmounts sentinel is 0). Nothing to reclaim.
-                  </Alert>
+                  <Alert severity="info">Swap already completed — nothing to reclaim.</Alert>
                 )}
                 {usdcStatus.kind === 'found' && (
-                  <Stack spacing={1}>
+                  <Stack spacing={0.5}>
                     <Typography>Amount locked: {usdcStatus.amount.toString()}</Typography>
-                    <Typography>Deadline: {new Date(usdcStatus.expiryMs).toISOString()}</Typography>
+                    <Typography>Deadline: {new Date(usdcStatus.expiryMs).toLocaleString()}</Typography>
                     {usdcStatus.expired ? (
                       <Alert severity="success">Deadline has passed — eligible for reclaim.</Alert>
                     ) : (
                       <Alert severity="warning">
-                        Deadline has not yet passed ({Math.ceil((usdcStatus.expiryMs - Date.now()) / 60000)} min
-                        remaining).
+                        Deadline not yet reached (~
+                        {Math.ceil((usdcStatus.expiryMs - Date.now()) / 60000)} min remaining).
                       </Alert>
                     )}
-                    <Button
-                      variant="contained"
-                      color="warning"
-                      onClick={() => void manualReclaimUsdc()}
-                      disabled={!usdcStatus.expired}
-                    >
-                      Reclaim USDC
-                    </Button>
                   </Stack>
                 )}
-                {usdcStatus.kind === 'reclaiming' && (
-                  <Stack direction="row" spacing={2} alignItems="center">
-                    <CircularProgress size={20} />
-                    <Typography>Submitting reclaim. Please sign in Lace.</Typography>
-                  </Stack>
-                )}
+                {usdcStatus.kind === 'reclaiming' && <InlineBusy label="Submitting reclaim. Sign in Midnight wallet." />}
                 {usdcStatus.kind === 'done' && (
                   <Alert severity="success">Reclaimed {usdcStatus.amount.toString()} USDC.</Alert>
                 )}
                 {usdcStatus.kind === 'error' && <Alert severity="error">{usdcStatus.message}</Alert>}
-              </Stack>
-            </CardContent>
-          </Card>
+              </>
+            }
+            canReclaim={usdcStatus.kind === 'found' && usdcStatus.expired}
+          />
         </Stack>
       </Collapse>
     </Stack>
   );
 };
+
+const Section: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  count: number;
+  children: React.ReactNode;
+}> = ({ icon, title, subtitle, count, children }) => {
+  const theme = useTheme();
+  return (
+    <Box
+      sx={{
+        p: 2.5,
+        borderRadius: 4,
+        border: `1px solid ${theme.custom.borderSubtle}`,
+        bgcolor: theme.custom.surface1,
+      }}
+    >
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }}>
+        {icon}
+        <Stack>
+          <Typography sx={{ fontWeight: 600 }}>{title}</Typography>
+          <Typography variant="caption" sx={{ color: theme.custom.textSecondary }}>
+            {subtitle}
+          </Typography>
+        </Stack>
+        <Box sx={{ flex: 1 }} />
+        <Chip size="small" label={`${count} eligible`} color="warning" />
+      </Stack>
+      <Stack spacing={1}>{children}</Stack>
+    </Box>
+  );
+};
+
+const ReclaimRow: React.FC<{
+  swap: Swap;
+  rowStatus: RowStatus;
+  side: 'ada' | 'usdc';
+  onReclaim: () => void;
+  disabled?: boolean;
+  disabledReason?: string;
+}> = ({ swap, rowStatus, side, onReclaim, disabled, disabledReason }) => {
+  const theme = useTheme();
+  const deadlineMs = side === 'ada' ? swap.cardanoDeadlineMs : swap.midnightDeadlineMs ?? 0;
+
+  return (
+    <Box
+      sx={{
+        p: 2,
+        borderRadius: 3,
+        border: `1px solid ${alpha(theme.custom.warning, 0.28)}`,
+        bgcolor: alpha(theme.custom.warning, 0.05),
+      }}
+    >
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
+        <Stack sx={{ flex: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography sx={{ fontWeight: 600 }}>
+              {side === 'ada'
+                ? `${swap.adaAmount} ADA → ${swap.usdcAmount} USDC`
+                : `${swap.usdcAmount} USDC → ${swap.adaAmount} ADA`}
+            </Typography>
+            <Chip size="small" color="error" label={`expired ${formatAgo(deadlineMs)}`} />
+            <SwapStatusChip status={swap.status} />
+          </Stack>
+          <Typography variant="caption" sx={{ color: theme.custom.textMuted, mt: 0.25 }}>
+            {new Date(deadlineMs).toLocaleString()} · {swap.hash.slice(0, 16)}…
+          </Typography>
+        </Stack>
+        <Box sx={{ minWidth: 160 }}>
+          {rowStatus.kind === 'submitting' ? (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <CircularProgress size={14} />
+              <Typography variant="caption">Submitting…</Typography>
+            </Stack>
+          ) : rowStatus.kind === 'done' ? (
+            <Chip size="small" color="success" label={rowStatus.detail ?? 'Submitted'} />
+          ) : rowStatus.kind === 'error' ? (
+            <Typography variant="caption" sx={{ color: theme.custom.danger }}>
+              {rowStatus.message}
+            </Typography>
+          ) : (
+            <Tooltip title={disabled ? disabledReason ?? '' : ''}>
+              <span>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  onClick={onReclaim}
+                  disabled={disabled}
+                  sx={{ whiteSpace: 'nowrap' }}
+                >
+                  Reclaim {side === 'ada' ? 'ADA' : 'USDC'}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+        </Box>
+      </Stack>
+    </Box>
+  );
+};
+
+const ManualChainPanel: React.FC<{
+  title: string;
+  onInspect: () => void;
+  onReclaim: () => void;
+  disabledInspect: boolean;
+  body: React.ReactNode;
+  canReclaim: boolean;
+}> = ({ title, onInspect, onReclaim, disabledInspect, body, canReclaim }) => {
+  const theme = useTheme();
+  return (
+    <Box
+      sx={{
+        p: 2.5,
+        borderRadius: 4,
+        border: `1px solid ${theme.custom.borderSubtle}`,
+        bgcolor: theme.custom.surface1,
+      }}
+    >
+      <Typography sx={{ fontWeight: 600, mb: 1.5 }}>{title}</Typography>
+      <Stack spacing={1.5}>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" onClick={onInspect} disabled={disabledInspect}>
+            Check state
+          </Button>
+          <Button variant="contained" color="warning" onClick={onReclaim} disabled={!canReclaim}>
+            Reclaim
+          </Button>
+        </Stack>
+        {body}
+      </Stack>
+    </Box>
+  );
+};
+
+const InlineBusy: React.FC<{ label: string }> = ({ label }) => (
+  <Stack direction="row" spacing={1} alignItems="center">
+    <CircularProgress size={14} />
+    <Typography variant="body2">{label}</Typography>
+  </Stack>
+);

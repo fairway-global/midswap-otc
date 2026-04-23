@@ -1,26 +1,32 @@
 /**
- * /mint-usdc — self-serve USDC minting page.
- *
- * The USDC contract has NO auth on mint — anyone with tNight for fees can
- * mint to any recipient. In the CLI flow this is handled by
- * `htlc-ft-cli/src/mint-usdc.ts`; the browser equivalent just calls
- * `UsdcAPI.mint(userEither(recipientBytes), amount)` via the connected 1AM
- * wallet. Bob needs this before his first swap (otherwise `receiveUnshielded`
- * inside `htlc.deposit` fails with no matching-color coins).
- *
- * Default recipient is the connected wallet's own unshielded address so the
- * common case is "connect Lace, click Mint".
+ * /mint — self-serve USDC mint so first-time takers can hold some USDC before
+ * attempting a swap. The Midnight USDC contract has no auth on `mint()` — this
+ * is a demo affordance, clearly labelled as such.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Box, Card, CardContent, Chip, Divider, Stack, TextField, Typography } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Button,
+  IconButton,
+  InputAdornment,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
+import AutorenewIcon from '@mui/icons-material/Autorenew';
+import { alpha, useTheme } from '@mui/material/styles';
 import { useSwapContext } from '../hooks';
 import { useToast } from '../hooks/useToast';
 import { AsyncButton } from './AsyncButton';
 import { WalletGate } from './WalletGate';
 import { hexToBytes, userEither } from '../api/key-encoding';
+import { TokenBadge } from './swap/TokenBadge';
+import { USDC } from './swap/tokens';
 
-const MintUsdcInner: React.FC = () => {
+const MintInner: React.FC = () => {
+  const theme = useTheme();
   const { session, swapState } = useSwapContext();
   const toast = useToast();
   const [recipient, setRecipient] = useState<string>('');
@@ -43,86 +49,114 @@ const MintUsdcInner: React.FC = () => {
     if (amt <= 0n) throw new Error('Amount must be a positive integer.');
     const recipientBytes = hexToBytes(clean);
     await session.usdcApi.mint(userEither(recipientBytes), amt);
-    setLastMint({ amount: amount, recipient: clean });
+    setLastMint({ amount, recipient: clean });
     toast.success(`Minted ${amount} USDC to ${clean.slice(0, 12)}…`);
   }, [session, recipient, amount, toast]);
 
-  const onMintToSelf = useCallback(() => {
+  const onUseSelf = useCallback(() => {
     if (!session) return;
     setRecipient(session.bootstrap.unshieldedAddressHex);
   }, [session]);
 
   return (
-    <Stack spacing={3} sx={{ width: '100%', maxWidth: 720 }}>
-      <Typography variant="h4">Mint USDC</Typography>
-      <Alert severity="info">
-        <Typography variant="body2">
-          The USDC contract has <strong>no auth on mint</strong> — anyone can mint any amount to any recipient. This is
-          intentional for the demo so users can self-serve the tokens they need for a swap. In production you would
-          restrict minting.
+    <Stack spacing={3} alignItems="center" sx={{ width: '100%' }}>
+      <Stack spacing={1} sx={{ textAlign: 'center', maxWidth: 560 }}>
+        <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
+          <TokenBadge token={USDC} size={36} />
+          <Typography variant="h4">Mint USDC</Typography>
+        </Stack>
+        <Typography sx={{ color: theme.custom.textSecondary }}>
+          First time taking an offer? Mint some native USDC on Midnight so you have the asset in your 1AM wallet.
         </Typography>
-      </Alert>
+      </Stack>
 
-      <Card>
-        <CardContent>
-          <Stack spacing={2}>
-            <Typography variant="h6">Parameters</Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-              <Typography variant="body2" sx={{ minWidth: 80 }}>
-                Token
+      <Box
+        sx={{
+          width: '100%',
+          maxWidth: 480,
+          p: 2.5,
+          borderRadius: 4,
+          border: `1px solid ${theme.custom.borderSubtle}`,
+          bgcolor: theme.custom.surface1,
+        }}
+      >
+        <Alert severity="info" sx={{ mb: 2 }}>
+          This mint has <strong>no access control</strong> — it&apos;s a demo affordance for preprod. Any connected
+          wallet can mint any amount.
+        </Alert>
+
+        <Stack spacing={2}>
+          <TextField
+            label="Recipient (Midnight unshielded, 64 hex)"
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value.trim().toLowerCase())}
+            size="small"
+            fullWidth
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={onUseSelf} size="small" title="Use my connected wallet">
+                    <AutorenewIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+            helperText="Tap the refresh icon to use your own connected wallet."
+          />
+
+          <TextField
+            label="Amount"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            type="number"
+            size="small"
+            fullWidth
+            InputProps={{ endAdornment: <InputAdornment position="end">USDC</InputAdornment> }}
+            helperText="Native unshielded tokens — no decimals. 1 USDC = 1 native coin."
+          />
+
+          <Box
+            sx={{
+              p: 1.5,
+              borderRadius: 2,
+              bgcolor: alpha(theme.custom.cardanoBlue, 0.06),
+              border: `1px solid ${alpha(theme.custom.cardanoBlue, 0.2)}`,
+            }}
+          >
+            <Typography variant="caption" sx={{ color: theme.custom.textSecondary, display: 'block' }}>
+              Token color{' '}
+              <Typography
+                component="span"
+                sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: theme.custom.textMuted }}
+              >
+                {swapState.usdcColor.slice(0, 32)}…
               </Typography>
-              <Chip size="small" label={swapState.tokenSymbol} />
-              <Typography variant="caption" sx={{ wordBreak: 'break-all', opacity: 0.7 }}>
-                color: {swapState.usdcColor}
-              </Typography>
-            </Stack>
+            </Typography>
+          </Box>
 
-            <TextField
-              label="Recipient (Midnight unshielded address, 64 hex)"
-              value={recipient}
-              onChange={(e) => setRecipient(e.target.value.trim().toLowerCase())}
-              size="small"
-              helperText={
-                <Box
-                  component="span"
-                  sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center', cursor: 'pointer' }}
-                  onClick={onMintToSelf}
-                >
-                  Use my connected 1AM wallet address
-                </Box>
-              }
-              fullWidth
-            />
+          <AsyncButton variant="contained" color="primary" size="large" fullWidth onClick={onMint} pendingLabel="Signing in Midnight wallet…">
+            Mint USDC
+          </AsyncButton>
 
-            <TextField
-              label="Amount"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              type="number"
-              size="small"
-              helperText="Native unshielded tokens — no decimals. 1 USDC = 1 native coin."
-            />
+          {lastMint && (
+            <Alert severity="success">
+              Minted {lastMint.amount} USDC → {lastMint.recipient.slice(0, 16)}…
+            </Alert>
+          )}
+        </Stack>
+      </Box>
 
-            <Divider />
-
-            <AsyncButton variant="contained" color="primary" onClick={onMint}>
-              Mint USDC
-            </AsyncButton>
-
-            {lastMint && (
-              <Alert severity="success">
-                Minted {lastMint.amount} USDC to {lastMint.recipient.slice(0, 16)}…
-              </Alert>
-            )}
-          </Stack>
-        </CardContent>
-      </Card>
+      <Stack direction="row" spacing={1}>
+        <Button variant="text" href="https://faucet.preprod.midnight.network/" target="_blank" rel="noopener">
+          Midnight preprod faucet →
+        </Button>
+      </Stack>
     </Stack>
   );
 };
 
 export const MintUsdc: React.FC = () => (
   <WalletGate require={{ midnight: true }} title="Mint USDC">
-    <MintUsdcInner />
+    <MintInner />
   </WalletGate>
 );
