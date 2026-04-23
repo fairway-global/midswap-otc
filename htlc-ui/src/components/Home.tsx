@@ -53,7 +53,7 @@ export const Home: React.FC = () => {
           </Box>
         </Typography>
         <Typography sx={{ color: theme.custom.textSecondary, fontSize: '1.05rem' }}>
-          Hash-time-locked escrow on both chains — no custodian, no bridge, no trust. Either both sides settle, or both
+          Hash-time-locked escrow on both chains, no custodian, no bridge, no trust. Either both sides settle, or both
           sides reclaim.
         </Typography>
       </Stack>
@@ -61,18 +61,18 @@ export const Home: React.FC = () => {
       <SwapCard />
 
       <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        spacing={2}
-        sx={{ width: '100%', maxWidth: 680, mt: 1, color: theme.custom.textSecondary }}
+        direction={{ xs: 'column', md: 'row' }}
+        spacing={{ xs: 2, md: 3 }}
+        sx={{ width: '100%', maxWidth: 1100, mt: 2, color: theme.custom.textSecondary }}
       >
         <FeatureBullet icon={<ShieldIcon />} title="Trustless">
-          Preimage locks mean either both sides settle or both sides reclaim — the worst case is a timeout.
+          Preimage locks mean either both sides settle or both sides reclaim — the worst case is a timeout, never theft.
         </FeatureBullet>
         <FeatureBullet icon={<HubIcon />} title="Cross-chain">
-          Cardano Aiken validator on one side, Midnight Compact circuit on the other. No wrapped assets.
+          A Cardano Aiken validator on one side, a Midnight Compact circuit on the other. No bridges, no wrapped assets.
         </FeatureBullet>
         <FeatureBullet icon={<AutoAwesomeIcon />} title="Self-custody">
-          Your keys sign every move. Midswap is stateless relative to your funds.
+          Your keys sign every move. Midswap is stateless relative to your funds — nothing custodial, nothing proxied.
         </FeatureBullet>
       </Stack>
     </Stack>
@@ -89,18 +89,19 @@ const FeatureBullet: React.FC<{ icon: React.ReactNode; title: string; children: 
     <Box
       sx={{
         flex: 1,
-        p: 2,
-        borderRadius: 3,
+        minWidth: 0,
+        p: { xs: 2.5, md: 3.25 },
+        borderRadius: 4,
         border: `1px solid ${theme.custom.borderSubtle}`,
         bgcolor: alpha(theme.custom.surface1, 0.6),
       }}
     >
-      <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mb: 0.75 }}>
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.25 }}>
         <Box
           sx={{
-            width: 28,
-            height: 28,
-            borderRadius: 2,
+            width: 36,
+            height: 36,
+            borderRadius: 2.5,
             bgcolor: alpha(theme.custom.cardanoBlue, 0.16),
             color: theme.custom.cardanoBlue,
             display: 'flex',
@@ -110,9 +111,9 @@ const FeatureBullet: React.FC<{ icon: React.ReactNode; title: string; children: 
         >
           {icon}
         </Box>
-        <Typography sx={{ fontWeight: 600, color: theme.custom.textPrimary }}>{title}</Typography>
+        <Typography sx={{ fontWeight: 600, fontSize: '1.05rem', color: theme.custom.textPrimary }}>{title}</Typography>
       </Stack>
-      <Typography variant="body2" sx={{ color: theme.custom.textSecondary, fontSize: '0.85rem' }}>
+      <Typography sx={{ color: theme.custom.textSecondary, fontSize: '0.95rem', lineHeight: 1.55 }}>
         {children}
       </Typography>
     </Box>

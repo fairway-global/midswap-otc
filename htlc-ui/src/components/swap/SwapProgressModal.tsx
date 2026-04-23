@@ -1,8 +1,8 @@
 /**
- * Modal that drives the multi-step swap flow once the user has clicked the
- * primary CTA. Shows a vertical stepper for each phase, highlights the one
- * currently running, and surfaces any per-phase action (the share URL for
- * the maker flow, the "claim" CTAs on either side).
+ * Progress modal — drives the multi-step swap flow for all four (role, flow)
+ * combinations. Each combination produces its own phase list (labels adapted
+ * to which chain each step lives on). The modal picks the correct state and
+ * actions based on role + flowDirection.
  */
 
 import React from 'react';
@@ -25,37 +25,15 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { alpha, useTheme } from '@mui/material/styles';
-import type { MakerStep } from './useMakerFlow';
-import type { TakerStep } from './useTakerFlow';
+import type { FlowDirection, Role, TokenMeta } from './tokens';
+import type { UseMakerFlow, MakerStep } from './useMakerFlow';
+import type { UseTakerFlow, TakerStep } from './useTakerFlow';
+import type { UseReverseMakerFlow, ReverseMakerStep } from './useReverseMakerFlow';
+import type { UseReverseTakerFlow, ReverseTakerStep } from './useReverseTakerFlow';
 import { AsyncButton } from '../AsyncButton';
 import { ShareUrlCard } from '../ShareUrlCard';
 import { describeBobWindow, limits } from '../../config/limits';
-import type { TokenMeta } from './tokens';
 import { TokenBadge } from './TokenBadge';
-
-type Mode =
-  | {
-      variant: 'maker';
-      state: MakerStep;
-      shareUrl: string | undefined;
-      onClaim: () => void | Promise<void>;
-      onReset: () => void;
-    }
-  | {
-      variant: 'taker';
-      state: TakerStep;
-      onAccept: () => void;
-      onClaim: () => void | Promise<void>;
-      onReset: () => void;
-      usdcColor: string;
-    };
-
-type Props = Mode & {
-  readonly open: boolean;
-  readonly onClose: () => void;
-  readonly pay: TokenMeta;
-  readonly receive: TokenMeta;
-};
 
 type StepStatus = 'pending' | 'active' | 'done' | 'error';
 
@@ -65,6 +43,21 @@ interface PhaseRow {
   subtitle?: React.ReactNode;
   status: StepStatus;
   action?: React.ReactNode;
+}
+
+interface Props {
+  readonly role: Role;
+  readonly flowDirection: FlowDirection;
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly onReset: () => void;
+  readonly pay: TokenMeta;
+  readonly receive: TokenMeta;
+  readonly usdcColor: string;
+  readonly fwdMaker: UseMakerFlow;
+  readonly fwdTaker: UseTakerFlow;
+  readonly revMaker: UseReverseMakerFlow;
+  readonly revTaker: UseReverseTakerFlow;
 }
 
 const TX_SCAN_BASE = {
@@ -81,7 +74,11 @@ const txLink = (chain: 'midnight' | 'cardano', hash: string): React.ReactNode =>
   </Link>
 );
 
-const buildMakerPhases = (
+// ---------------------------------------------------------------------------
+// Forward maker (ada-usdc maker)
+// ---------------------------------------------------------------------------
+
+const buildForwardMakerPhases = (
   state: MakerStep,
   shareUrl: string | undefined,
   onClaim: () => void | Promise<void>,
@@ -121,7 +118,7 @@ const buildMakerPhases = (
       title: 'Share the offer',
       subtitle:
         afterLock && shareUrl
-          ? 'The counterparty opens this URL (or scans the QR) to accept. Once they deposit, this step is done.'
+          ? 'The counterparty opens this URL to accept. Once they deposit USDC, this step is done.'
           : 'Waiting for lock confirmation…',
       status: afterDeposit ? 'done' : afterLock && shareUrl ? 'active' : 'pending',
       action:
@@ -135,7 +132,7 @@ const buildMakerPhases = (
       subtitle: afterClaim
         ? `Received ${state.kind === 'done' ? state.depositAmount.toString() : ''} USDC.`
         : afterDeposit
-          ? 'Counterparty deposited — you can claim now. Claiming reveals the preimage so they can finish on Cardano.'
+          ? 'Counterparty deposited — you can claim now. Claiming reveals the preimage on Midnight.'
           : 'Waits for the counterparty deposit to appear on Midnight.',
       status: state.kind === 'claiming' ? 'active' : afterClaim ? 'done' : afterDeposit ? 'active' : 'pending',
       action:
@@ -148,7 +145,11 @@ const buildMakerPhases = (
   ];
 };
 
-const buildTakerPhases = (
+// ---------------------------------------------------------------------------
+// Forward taker (ada-usdc taker)
+// ---------------------------------------------------------------------------
+
+const buildForwardTakerPhases = (
   state: TakerStep,
   onAccept: () => void,
   onClaim: () => void | Promise<void>,
@@ -172,7 +173,7 @@ const buildTakerPhases = (
   return [
     {
       id: 'watch',
-      title: 'Verify the maker’s ADA lock',
+      title: "Verify the maker's ADA lock",
       subtitle:
         state.kind === 'watching-cardano'
           ? 'Scanning Cardano for the lock bound to your wallet…'
@@ -218,7 +219,7 @@ const buildTakerPhases = (
               </Alert>
             )}
             <AsyncButton variant="contained" color="primary" size="large" onClick={onAccept} pendingLabel="Preparing…">
-              Accept offer & deposit {state.url.usdcAmount.toString()} USDC
+              Accept & deposit {state.url.usdcAmount.toString()} USDC
             </AsyncButton>
             <Typography variant="caption" sx={{ color: (t) => t.custom.textMuted }}>
               USDC color {usdcColor.slice(0, 16)}…
@@ -261,6 +262,176 @@ const buildTakerPhases = (
   ];
 };
 
+// ---------------------------------------------------------------------------
+// Reverse maker (usdc-ada maker)
+// ---------------------------------------------------------------------------
+
+const buildReverseMakerPhases = (
+  state: ReverseMakerStep,
+  shareUrl: string | undefined,
+  onClaim: () => void | Promise<void>,
+): PhaseRow[] => {
+  const hasDepositInfo =
+    state.kind === 'deposited' ||
+    state.kind === 'waiting-cardano' ||
+    state.kind === 'claim-ready' ||
+    state.kind === 'claiming';
+  const afterDeposit = hasDepositInfo || state.kind === 'done';
+  const afterCardanoLock = state.kind === 'claim-ready' || state.kind === 'claiming' || state.kind === 'done';
+  const afterClaim = state.kind === 'done';
+
+  let depositSubtitle: React.ReactNode;
+  if (state.kind === 'depositing') {
+    depositSubtitle = 'Please sign in your Midnight wallet.';
+  } else if (hasDepositInfo) {
+    depositSubtitle = `Deposit expires ${new Date(Number(state.midnightDeadlineMs)).toLocaleString()}.`;
+  } else if (state.kind === 'done') {
+    depositSubtitle = 'USDC deposit done.';
+  }
+
+  return [
+    {
+      id: 'deposit',
+      title: 'Deposit USDC on Midnight',
+      subtitle: depositSubtitle,
+      status:
+        state.kind === 'depositing' ? 'active' : afterDeposit ? 'done' : state.kind === 'error' ? 'error' : 'pending',
+    },
+    {
+      id: 'share',
+      title: 'Share the offer',
+      subtitle:
+        afterDeposit && shareUrl
+          ? 'The counterparty opens this URL and locks ADA on Cardano bound to your PKH.'
+          : 'Waiting for deposit confirmation…',
+      status: afterCardanoLock ? 'done' : afterDeposit && shareUrl ? 'active' : 'pending',
+      action:
+        afterDeposit && shareUrl && !afterCardanoLock ? (
+          <ShareUrlCard shareUrl={shareUrl} title="Share the offer URL" />
+        ) : undefined,
+    },
+    {
+      id: 'claim',
+      title: 'Claim ADA on Cardano',
+      subtitle:
+        state.kind === 'done' ? (
+          <>Claim tx {txLink('cardano', state.claimTxHash)}. Preimage revealed via tx redeemer.</>
+        ) : afterCardanoLock ? (
+          'Counterparty locked ADA — claim it now. The preimage is revealed via the Cardano tx redeemer.'
+        ) : (
+          'Waits for the counterparty to lock ADA bound to your PKH.'
+        ),
+      status: state.kind === 'claiming' ? 'active' : afterClaim ? 'done' : afterCardanoLock ? 'active' : 'pending',
+      action:
+        state.kind === 'claim-ready' ? (
+          <AsyncButton variant="contained" color="primary" size="large" onClick={onClaim} pendingLabel="Signing…">
+            Claim {(Number(state.cardanoHtlc.amountLovelace) / 1e6).toFixed(6)} ADA
+          </AsyncButton>
+        ) : undefined,
+    },
+  ];
+};
+
+// ---------------------------------------------------------------------------
+// Reverse taker (usdc-ada taker)
+// ---------------------------------------------------------------------------
+
+const buildReverseTakerPhases = (
+  state: ReverseTakerStep,
+  onAccept: () => void,
+  onClaim: () => void | Promise<void>,
+): PhaseRow[] => {
+  const hasMidnightInfo = 'midnightInfo' in state;
+  const afterVerify = hasMidnightInfo;
+  const afterLock =
+    state.kind === 'waiting-preimage' ||
+    state.kind === 'claim-ready' ||
+    state.kind === 'claiming' ||
+    state.kind === 'done';
+  const afterPreimage = state.kind === 'claim-ready' || state.kind === 'claiming' || state.kind === 'done';
+  const afterClaim = state.kind === 'done';
+
+  return [
+    {
+      id: 'verify',
+      title: "Verify the maker's USDC deposit",
+      subtitle:
+        state.kind === 'verifying-midnight'
+          ? 'Scanning Midnight for the deposit bound to your wallet…'
+          : state.kind === 'mismatch' || state.kind === 'unsafe-deadline'
+            ? state.reason
+            : hasMidnightInfo
+              ? `Found: ${state.midnightInfo.amount.toString()} USDC escrowed.`
+              : 'Waiting for wallet connection.',
+      status:
+        state.kind === 'verifying-midnight'
+          ? 'active'
+          : afterVerify
+            ? 'done'
+            : state.kind === 'mismatch' || state.kind === 'unsafe-deadline' || state.kind === 'error'
+              ? 'error'
+              : 'pending',
+    },
+    {
+      id: 'lock',
+      title: 'Lock ADA on Cardano',
+      subtitle: afterLock
+        ? 'Locked. ADA is escrowed until the maker claims it or your deadline passes.'
+        : state.kind === 'locking'
+          ? 'Please sign in your Cardano wallet.'
+          : state.kind === 'confirm'
+            ? describeBobWindow(Number(state.url.midnightDeadlineMs), Number(state.takerDeadlineMs) / 1000)
+            : 'Waiting for verification.',
+      status:
+        state.kind === 'locking' ? 'active' : afterLock ? 'done' : state.kind === 'confirm' ? 'active' : 'pending',
+      action:
+        state.kind === 'confirm' ? (
+          <Stack spacing={1}>
+            {state.truncated && (
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                Cardano deadline truncated to stay {Math.round(limits.bobSafetyBufferSecs / 60)}min inside the
+                maker&apos;s Midnight window.
+              </Alert>
+            )}
+            <AsyncButton variant="contained" color="primary" size="large" onClick={onAccept} pendingLabel="Preparing…">
+              Accept & lock {state.url.adaAmount.toString()} ADA
+            </AsyncButton>
+          </Stack>
+        ) : undefined,
+    },
+    {
+      id: 'preimage',
+      title: 'Wait for the maker to claim',
+      subtitle: afterPreimage
+        ? 'Preimage read from the Cardano claim tx.'
+        : afterLock
+          ? 'Polling Cardano for the maker’s claim tx (Blockfrost).'
+          : 'Pending.',
+      status: state.kind === 'waiting-preimage' ? 'active' : afterPreimage ? 'done' : 'pending',
+    },
+    {
+      id: 'claim',
+      title: 'Claim USDC on Midnight',
+      subtitle: afterClaim
+        ? `Received ${(state as Extract<ReverseTakerStep, { midnightInfo: { amount: bigint } }>).midnightInfo.amount.toString()} USDC.`
+        : afterPreimage
+          ? 'Ready to claim with the revealed preimage.'
+          : 'Pending.',
+      status: state.kind === 'claiming' ? 'active' : afterClaim ? 'done' : afterPreimage ? 'active' : 'pending',
+      action:
+        state.kind === 'claim-ready' ? (
+          <AsyncButton variant="contained" color="primary" size="large" onClick={onClaim} pendingLabel="Signing…">
+            Claim USDC
+          </AsyncButton>
+        ) : undefined,
+    },
+  ];
+};
+
+// ---------------------------------------------------------------------------
+// Dispatcher
+// ---------------------------------------------------------------------------
+
 const PhaseIcon: React.FC<{ status: StepStatus }> = ({ status }) => {
   const theme = useTheme();
   if (status === 'done') return <CheckCircleIcon fontSize="small" sx={{ color: theme.custom.success }} />;
@@ -270,24 +441,65 @@ const PhaseIcon: React.FC<{ status: StepStatus }> = ({ status }) => {
 };
 
 export const SwapProgressModal: React.FC<Props> = (props) => {
-  const { open, onClose, pay, receive } = props;
+  const {
+    open,
+    onClose,
+    onReset,
+    pay,
+    receive,
+    role,
+    flowDirection,
+    fwdMaker,
+    fwdTaker,
+    revMaker,
+    revTaker,
+    usdcColor,
+  } = props;
   const theme = useTheme();
 
-  const phases: PhaseRow[] =
-    props.variant === 'maker'
-      ? buildMakerPhases(props.state, props.shareUrl, props.onClaim)
-      : buildTakerPhases(props.state, props.onAccept, props.onClaim, props.usdcColor);
+  let phases: PhaseRow[];
+  let activeKind: string;
+  let errorMessage: string | undefined;
+  if (role === 'maker' && flowDirection === 'ada-usdc') {
+    phases = buildForwardMakerPhases(fwdMaker.state, fwdMaker.shareUrl, fwdMaker.claim);
+    activeKind = fwdMaker.state.kind;
+    errorMessage = fwdMaker.state.kind === 'error' ? fwdMaker.state.message : undefined;
+  } else if (role === 'taker' && flowDirection === 'ada-usdc') {
+    phases = buildForwardTakerPhases(fwdTaker.state, fwdTaker.accept, fwdTaker.claim, usdcColor);
+    activeKind = fwdTaker.state.kind;
+    errorMessage =
+      fwdTaker.state.kind === 'error'
+        ? fwdTaker.state.message
+        : fwdTaker.state.kind === 'unsafe-deadline'
+          ? fwdTaker.state.reason
+          : undefined;
+  } else if (role === 'maker' && flowDirection === 'usdc-ada') {
+    phases = buildReverseMakerPhases(revMaker.state, revMaker.shareUrl, revMaker.claim);
+    activeKind = revMaker.state.kind;
+    errorMessage = revMaker.state.kind === 'error' ? revMaker.state.message : undefined;
+  } else {
+    phases = buildReverseTakerPhases(revTaker.state, revTaker.accept, revTaker.claim);
+    activeKind = revTaker.state.kind;
+    errorMessage =
+      revTaker.state.kind === 'error'
+        ? revTaker.state.message
+        : revTaker.state.kind === 'unsafe-deadline'
+          ? revTaker.state.reason
+          : revTaker.state.kind === 'mismatch'
+            ? revTaker.state.reason
+            : undefined;
+  }
+  const isDone = activeKind === 'done';
 
-  const isDone =
-    (props.variant === 'maker' && props.state.kind === 'done') ||
-    (props.variant === 'taker' && props.state.kind === 'done');
-  const errorMessage =
-    (props.variant === 'maker' && props.state.kind === 'error' && props.state.message) ||
-    (props.variant === 'taker' && props.state.kind === 'error' && props.state.message) ||
-    (props.variant === 'taker' && props.state.kind === 'unsafe-deadline' && props.state.reason) ||
-    undefined;
-
-  const title = isDone ? 'Swap complete' : props.variant === 'maker' ? 'Making an offer' : 'Taking an offer';
+  const title = isDone
+    ? 'Swap complete'
+    : role === 'maker'
+      ? flowDirection === 'ada-usdc'
+        ? 'Making an ADA → USDC offer'
+        : 'Making a USDC → ADA offer'
+      : flowDirection === 'ada-usdc'
+        ? 'Taking an ADA → USDC offer'
+        : 'Taking a USDC → ADA offer';
 
   const subtitle = `${pay.symbol} on ${pay.chain} → ${receive.symbol} on ${receive.chain}`;
 
@@ -367,24 +579,13 @@ export const SwapProgressModal: React.FC<Props> = (props) => {
               }}
             >
               <Typography sx={{ fontWeight: 600, color: theme.custom.success, mb: 0.5 }}>Funds received</Typography>
-              {props.variant === 'maker' && props.state.kind === 'done' && (
-                <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
-                  Sent {props.state.adaAmount.toString()} ADA · Received {props.state.depositAmount.toString()} USDC
-                </Typography>
-              )}
-              {props.variant === 'taker' && props.state.kind === 'done' && (
-                <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
-                  Sent {props.state.url.usdcAmount.toString()} USDC · Received{' '}
-                  {(Number(props.state.htlcInfo.amountLovelace) / 1e6).toFixed(6)} ADA
-                </Typography>
-              )}
             </Box>
           )}
 
           <Stack direction="row" spacing={1} sx={{ pt: 1 }}>
             <Box sx={{ flex: 1 }} />
             {(isDone || errorMessage) && (
-              <Button variant="outlined" color="primary" onClick={props.onReset}>
+              <Button variant="outlined" color="primary" onClick={onReset}>
                 Start new swap
               </Button>
             )}

@@ -38,10 +38,28 @@ export const USDC: TokenMeta = {
   monogramTo: '#5127D6',
 };
 
-export type Direction = 'maker' | 'taker';
+/**
+ * `Role` is who you are in the swap — `maker` initiates, `taker` responds.
+ * `FlowDirection` is which token the maker sends:
+ *   - `ada-usdc`: maker locks ADA on Cardano, taker deposits USDC on Midnight
+ *   - `usdc-ada`: maker deposits USDC on Midnight, taker locks ADA on Cardano
+ *
+ * The two flows mirror each other — same protocol, different chain ordering.
+ */
+export type Role = 'maker' | 'taker';
+export type FlowDirection = 'ada-usdc' | 'usdc-ada';
 
-/** Pay/receive pair for each direction. */
-export const DIRECTION: Record<Direction, { pay: TokenMeta; receive: TokenMeta }> = {
-  maker: { pay: ADA, receive: USDC },
-  taker: { pay: USDC, receive: ADA },
+export const FLOW_PAIR: Record<FlowDirection, Record<Role, { pay: TokenMeta; receive: TokenMeta }>> = {
+  'ada-usdc': {
+    maker: { pay: ADA, receive: USDC },
+    taker: { pay: USDC, receive: ADA },
+  },
+  'usdc-ada': {
+    maker: { pay: USDC, receive: ADA },
+    taker: { pay: ADA, receive: USDC },
+  },
 };
+
+/** Legacy alias — old code referred to roles as "direction". */
+export type Direction = Role;
+export const DIRECTION = FLOW_PAIR['ada-usdc'];

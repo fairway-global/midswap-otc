@@ -103,6 +103,8 @@ export class CardanoHTLCBrowser {
     readonly validator: SpendingValidator,
     readonly scriptAddress: string,
     readonly logger: Logger,
+    readonly blockfrostUrl: string,
+    readonly blockfrostApiKey: string,
   ) {}
 
   static async init(config: CardanoHTLCBrowserConfig, logger: Logger): Promise<CardanoHTLCBrowser> {
@@ -125,7 +127,80 @@ export class CardanoHTLCBrowser {
     const scriptAddress = validatorToAddress(config.network, validator);
     logger.info({ scriptAddress }, 'CardanoHTLC browser: script address');
 
-    return new CardanoHTLCBrowser(lucid, validator, scriptAddress, logger);
+    return new CardanoHTLCBrowser(
+      lucid,
+      validator,
+      scriptAddress,
+      logger,
+      config.blockfrostUrl,
+      config.blockfrostApiKey,
+    );
+  }
+
+  /**
+   * Reverse-flow helper — when the maker (of a USDC→ADA swap) claims ADA on
+   * Cardano they reveal the preimage via the tx redeemer. The taker reads it
+   * back here so they can claim USDC on Midnight.
+   *
+   * Walks recent transactions at the script address, finds the one that spent
+   * an HTLC UTxO whose datum held our target hash, and decodes the redeemer.
+   * Aiken `Withdraw { preimage }` is encoded as `Constr 0 [preimage]` (CBOR);
+   * `Reclaim` is `Constr 1 []`. Returns the preimage hex on a match.
+   */
+  async findClaimPreimage(preimageHash: string): Promise<string | undefined> {
+    const headers = { project_id: this.blockfrostApiKey };
+    const txsRes = await fetch(
+      `${this.blockfrostUrl}/addresses/${this.scriptAddress}/transactions?count=100&order=desc`,
+      { headers },
+    );
+    if (!txsRes.ok) return undefined;
+    const txs = (await txsRes.json()) as Array<{ tx_hash: string }>;
+
+    for (const { tx_hash } of txs) {
+      try {
+        const utxosRes = await fetch(`${this.blockfrostUrl}/txs/${tx_hash}/utxos`, { headers });
+        if (!utxosRes.ok) continue;
+        const txu = (await utxosRes.json()) as {
+          inputs: Array<{ address: string; inline_datum?: string | null; data_hash?: string | null }>;
+        };
+        const scriptInput = txu.inputs.find((i) => {
+          if (i.address !== this.scriptAddress || !i.inline_datum) return false;
+          try {
+            return decodeDatum(i.inline_datum).preimageHash === preimageHash;
+          } catch {
+            return false;
+          }
+        });
+        if (!scriptInput) continue;
+
+        const redeemersRes = await fetch(`${this.blockfrostUrl}/txs/${tx_hash}/redeemers`, { headers });
+        if (!redeemersRes.ok) continue;
+        const redeemers = (await redeemersRes.json()) as Array<{
+          purpose: string;
+          redeemer_data_hash?: string;
+          script_hash?: string;
+        }>;
+        const spend = redeemers.find((r) => r.purpose === 'spend');
+        if (!spend?.redeemer_data_hash) continue;
+
+        const datumRes = await fetch(`${this.blockfrostUrl}/scripts/datum/${spend.redeemer_data_hash}/cbor`, {
+          headers,
+        });
+        if (!datumRes.ok) continue;
+        const datum = (await datumRes.json()) as { cbor: string };
+        const parsed = Data.from(datum.cbor);
+        if (typeof parsed !== 'object' || parsed === null) continue;
+        const constr = parsed as { index?: bigint | number; fields?: unknown[] };
+        if (Number(constr.index) !== 0) continue; // not a Withdraw
+        const preimageHex = constr.fields?.[0];
+        if (typeof preimageHex !== 'string') continue;
+        const candidate = await sha256Hex(preimageHex);
+        if (candidate === preimageHash) return preimageHex;
+      } catch (e) {
+        this.logger.trace({ err: e, tx_hash }, 'findClaimPreimage: skipping tx');
+      }
+    }
+    return undefined;
   }
 
   selectWalletFromCIP30(api: CIP30Api): void {
