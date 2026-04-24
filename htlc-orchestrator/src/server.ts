@@ -28,12 +28,20 @@ const app = Fastify({
   },
 });
 
+const DEFAULT_ORIGINS = [
+  'http://localhost:5199',
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'https://midnight.finance',
+  'https://www.midnight.finance',
+  'https://midswap.vercel.app',
+];
+const extraOrigins = (process.env.CORS_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 await app.register(cors, {
-  origin: [
-    'http://localhost:5199',
-    'http://localhost:5173',
-    'http://localhost:8080',
-  ],
+  origin: [...DEFAULT_ORIGINS, ...extraOrigins],
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
 });
 
