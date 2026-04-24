@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useReducer } from 'react';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
-import { watchForHTLCDeposit, type HTLCDepositInfo } from '../../api/midnight-watcher';
+import { watchForHTLCDeposit, watchForPreimageReveal, type HTLCDepositInfo } from '../../api/midnight-watcher';
 import { bytesToHex, hexToBytes } from '../../api/key-encoding';
 import { limits } from '../../config/limits';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
@@ -86,7 +86,21 @@ type Action =
   | { t: 'to-claiming' }
   | { t: 'to-done' }
   | { t: 'error'; message: string }
-  | { t: 'reset' };
+  | { t: 'reset' }
+  // Resume paths — on page reload, skip ahead if on-chain state is already
+  // past `locking` so we don't re-prompt the taker to lock again.
+  | {
+      t: 'resume-to-waiting-preimage';
+      midnightInfo: HTLCDepositInfo;
+      takerDeadlineMs: bigint;
+      lockTxHash: string;
+    }
+  | {
+      t: 'resume-to-claim-ready';
+      midnightInfo: HTLCDepositInfo;
+      lockTxHash: string;
+      preimageHex: string;
+    };
 
 const reducer = (state: ReverseTakerStep, action: Action): ReverseTakerStep => {
   switch (action.t) {
@@ -160,6 +174,26 @@ const reducer = (state: ReverseTakerStep, action: Action): ReverseTakerStep => {
       return { kind: 'error', message: action.message, url: 'url' in state ? state.url : undefined };
     case 'reset':
       return { kind: 'idle' };
+    case 'resume-to-waiting-preimage':
+      return state.kind === 'verifying-midnight'
+        ? {
+            kind: 'waiting-preimage',
+            url: state.url,
+            midnightInfo: action.midnightInfo,
+            takerDeadlineMs: action.takerDeadlineMs,
+            lockTxHash: action.lockTxHash,
+          }
+        : state;
+    case 'resume-to-claim-ready':
+      return state.kind === 'verifying-midnight'
+        ? {
+            kind: 'claim-ready',
+            url: state.url,
+            midnightInfo: action.midnightInfo,
+            lockTxHash: action.lockTxHash,
+            preimageHex: action.preimageHex,
+          }
+        : state;
     default:
       return state;
   }
@@ -278,6 +312,44 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
           });
           return;
         }
+        // Resume fast-path: if we already locked USDM on Cardano in a
+        // previous session, on-chain state is ahead of the UI. Check for an
+        // existing lock (or its preimage if already claimed) and jump past
+        // `confirm`/`locking` so we don't re-prompt the user to lock.
+        try {
+          // First: has the maker already claimed? If so, preimage is in the
+          // Cardano tx redeemer and we go straight to claim-ready.
+          const preimageHex = await cardano.cardanoHtlc.findClaimPreimage(state.url.hashHex);
+          if (controller.signal.aborted) return;
+          if (preimageHex) {
+            const dbSwap = await orchestratorClient.getSwap(state.url.hashHex).catch(() => undefined);
+            dispatch({
+              t: 'resume-to-claim-ready',
+              midnightInfo: info,
+              lockTxHash: dbSwap?.cardanoLockTx ?? '',
+              preimageHex,
+            });
+            return;
+          }
+          // Otherwise: is our lock UTxO still sitting at the script address?
+          const existingLock = (await cardano.cardanoHtlc.listHTLCs()).find(
+            (h) => h.datum.preimageHash === state.url.hashHex,
+          );
+          if (controller.signal.aborted) return;
+          if (existingLock) {
+            dispatch({
+              t: 'resume-to-waiting-preimage',
+              midnightInfo: info,
+              takerDeadlineMs: existingLock.datum.deadline,
+              lockTxHash: existingLock.utxo.txHash,
+            });
+            return;
+          }
+        } catch (e) {
+          // Non-fatal — fall through to the normal confirm flow.
+          console.warn('[useReverseTakerFlow] resume check failed', e);
+        }
+
         dispatch({
           t: 'confirm',
           midnightInfo: info,
@@ -384,7 +456,42 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
     dispatch({ t: 'to-claiming' });
     try {
       const preimage = hexToBytes(state.preimageHex);
-      const claimTxHash = await session.htlcApi.withdrawWithPreimage(preimage);
+      // Verify-on-error for Lace submit timeout — see Landmine #5.
+      let submitError: unknown;
+      let claimTxHash: string | undefined;
+      try {
+        claimTxHash = await session.htlcApi.withdrawWithPreimage(preimage);
+      } catch (e) {
+        submitError = e;
+        console.warn('[useReverseTakerFlow:claim] submit surfaced error; verifying on-chain', e);
+      }
+
+      if (submitError) {
+        let claimed = false;
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 60_000);
+          await watchForPreimageReveal(
+            session.bootstrap.htlcProviders.publicDataProvider,
+            session.htlcApi.deployedContractAddress,
+            hexToBytes(state.url.hashHex),
+            5_000,
+            controller.signal,
+          );
+          clearTimeout(timer);
+          claimed = true;
+        } catch {
+          /* abort = preimage never surfaced within window */
+        }
+        if (!claimed) {
+          const msg = describeError(submitError);
+          toast.error(`Midnight claim failed: ${msg}`);
+          dispatch({ t: 'error', message: msg });
+          return;
+        }
+        toast.info('Wallet returned an error but the claim landed on-chain — continuing.');
+      }
+
       void tryOrchestrator(
         () =>
           orchestratorClient.patchSwap(state.url.hashHex, {

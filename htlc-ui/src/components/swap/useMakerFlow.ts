@@ -12,6 +12,7 @@ import { firstValueFrom } from 'rxjs';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { bytesToHex, hexToBytes } from '../../api/key-encoding';
+import { watchForPreimageReveal } from '../../api/midnight-watcher';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 
 export interface MakerLockParams {
@@ -424,7 +425,43 @@ export const useMakerFlow = (): UseMakerFlow => {
       }
 
       const preimage = hexToBytes(state.preimageHex);
-      await session.htlcApi.withdrawWithPreimage(preimage);
+      // Lace's submitTransaction sometimes throws "Request timed out" even when
+      // the tx lands on-chain (Landmine #5). Before failing, verify the claim
+      // by watching `revealedPreimages[hash]` on the Midnight indexer.
+      let submitError: unknown;
+      try {
+        await session.htlcApi.withdrawWithPreimage(preimage);
+      } catch (e) {
+        submitError = e;
+        console.warn('[useMakerFlow:claim] submit surfaced error; verifying on-chain', e);
+      }
+
+      if (submitError) {
+        let claimed = false;
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 60_000);
+          await watchForPreimageReveal(
+            session.bootstrap.htlcProviders.publicDataProvider,
+            session.htlcApi.deployedContractAddress,
+            hexToBytes(state.hashHex),
+            5_000,
+            controller.signal,
+          );
+          clearTimeout(timer);
+          claimed = true;
+        } catch {
+          /* abort = preimage never surfaced within window */
+        }
+        if (!claimed) {
+          const msg = describeError(submitError);
+          toast.error(`Claim failed: ${msg}`);
+          dispatch({ t: 'error', message: msg });
+          return;
+        }
+        toast.info('Wallet returned an error but the claim landed on-chain — continuing.');
+      }
+
       void tryOrchestrator(
         () =>
           orchestratorClient.patchSwap(state.hashHex, {

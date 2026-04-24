@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useReducer } from 'react';
+import { firstValueFrom } from 'rxjs';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { watchForCardanoLock, type CardanoHTLCInfo } from '../../api/cardano-watcher';
@@ -47,7 +48,12 @@ type TakerAction =
   | { t: 'to-claiming' }
   | { t: 'to-done'; claimTxHash: string }
   | { t: 'error'; message: string }
-  | { t: 'reset' };
+  | { t: 'reset' }
+  // Resume paths — on page reload, if on-chain state is ahead of the UI
+  // state, jump straight to the right step instead of re-prompting the user
+  // to deposit again.
+  | { t: 'resume-to-waiting-preimage'; htlcInfo: CardanoHTLCInfo }
+  | { t: 'resume-to-claim-ready'; htlcInfo: CardanoHTLCInfo; preimageHex: string };
 
 const reducer = (state: TakerStep, action: TakerAction): TakerStep => {
   switch (action.t) {
@@ -91,6 +97,14 @@ const reducer = (state: TakerStep, action: TakerAction): TakerStep => {
       return { kind: 'error', message: action.message, url: 'url' in state ? state.url : undefined };
     case 'reset':
       return { kind: 'idle' };
+    case 'resume-to-waiting-preimage':
+      return state.kind === 'watching-cardano'
+        ? { kind: 'waiting-preimage', url: state.url, htlcInfo: action.htlcInfo }
+        : state;
+    case 'resume-to-claim-ready':
+      return state.kind === 'watching-cardano'
+        ? { kind: 'claim-ready', url: state.url, htlcInfo: action.htlcInfo, preimageHex: action.preimageHex }
+        : state;
     default:
       return state;
   }
@@ -167,6 +181,44 @@ export const useTakerFlow = (): UseTakerFlow => {
           state.url.hashHex,
           controller.signal,
         );
+
+        // Resume fast-path: if the taker already deposited in a previous
+        // session (page reload / tab close), on-chain state is already ahead
+        // of the UI. Read the Midnight HTLC entry and jump straight to the
+        // right step instead of re-prompting "Deposit USDC".
+        //   • revealedPreimage set  → maker already claimed → claim-ready
+        //   • amount > 0 (bound to aliceCpk) → deposit landed → waiting-preimage
+        //   • otherwise → normal confirm flow
+        if (session) {
+          try {
+            const derived = await firstValueFrom(session.htlcApi.state$);
+            if (controller.signal.aborted) return;
+            const entry = derived.entries.get(state.url.hashHex);
+            if (entry) {
+              const receiverCpk = bytesToHex(entry.receiverAuth).toLowerCase();
+              const expectedAliceCpk = state.url.aliceCpkHex.toLowerCase();
+              if (receiverCpk === expectedAliceCpk) {
+                if (entry.revealedPreimage) {
+                  dispatch({
+                    t: 'resume-to-claim-ready',
+                    htlcInfo,
+                    preimageHex: bytesToHex(entry.revealedPreimage),
+                  });
+                  return;
+                }
+                if (entry.amount > 0n) {
+                  dispatch({ t: 'resume-to-waiting-preimage', htlcInfo });
+                  return;
+                }
+              }
+            }
+          } catch (e) {
+            // Non-fatal: fall through to normal confirm flow — the user can
+            // still proceed via the verify-on-error deposit path.
+            console.warn('[useTakerFlow] resume check failed', e);
+          }
+        }
+
         const nowSecs = Math.floor(Date.now() / 1000);
         const cardanoDeadlineSecs = Math.floor(Number(htlcInfo.deadlineMs) / 1000);
         const cardanoRemaining = cardanoDeadlineSecs - nowSecs;

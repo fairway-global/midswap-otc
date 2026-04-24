@@ -311,13 +311,19 @@ export class CardanoHTLCBrowser {
     }
 
     const redeemer = withdrawRedeemer(preimageHex);
+    // Lucid 0.4 defaults to local UPLC eval — faster and avoids Blockfrost's
+    // ogmios-backed /utils/txs/evaluate endpoint, which intermittently rejects
+    // native-asset-bearing tx CBOR with "failed to decode payload from base64
+    // or base16". Pass `localUPLCEval: true` explicitly so a stale bundle
+    // that still has `false` elsewhere in the call chain can't override us.
+    this.logger.info('CardanoHTLC: claim using local UPLC eval (no ogmios)');
     const tx = await this.lucid
       .newTx()
       .collectFrom([utxo], redeemer)
       .attach.SpendingValidator(this.validator)
       .addSigner(walletAddr)
       .validTo(validToMs)
-      .complete({ localUPLCEval: false });
+      .complete({ localUPLCEval: true });
 
     const signed = await tx.sign.withWallet().complete();
     const txHash = await signed.submit();
@@ -347,13 +353,15 @@ export class CardanoHTLCBrowser {
 
     const redeemer = reclaimRedeemer();
     // +1s slot offset — see CLI comment in htlc-ft-cli/src/cardano-htlc.ts.
+    // Explicit localUPLCEval: true — see the rationale in claim() above.
+    this.logger.info('CardanoHTLC: reclaim using local UPLC eval (no ogmios)');
     const tx = await this.lucid
       .newTx()
       .collectFrom([utxo], redeemer)
       .attach.SpendingValidator(this.validator)
       .addSigner(walletAddr)
       .validFrom(Number(datum.deadline) + 1000)
-      .complete({ localUPLCEval: false });
+      .complete({ localUPLCEval: true });
 
     const signed = await tx.sign.withWallet().complete();
     const txHash = await signed.submit();
