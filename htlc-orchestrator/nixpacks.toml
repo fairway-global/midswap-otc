@@ -1,0 +1,10 @@
+providers = ['node']
+
+[phases.setup]
+nixPkgs = ['nodejs_22']
+
+[phases.install]
+cmds = ['npm install --include=dev']
+
+[start]
+cmd = 'npm run start'
