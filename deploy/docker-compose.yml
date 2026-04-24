@@ -26,18 +26,17 @@ services:
       # SQLite database — persisted on the host so it survives container
       # recreations and image updates.
       - /opt/midswap/data:/data
-
-      # swap-state.json holds the deployed contract addresses.
-      # Generate it once with `npx tsx htlc-ft-cli/src/setup-contract.ts`,
-      # then scp it to the VM: scp swap-state.json deploy@VM:/opt/midswap/
-      - /opt/midswap/swap-state.json:/app/swap-state.json:ro
+      # swap-state.json is NOT mounted here because HTLC_CONTRACT_ADDRESS
+      # is set directly in /opt/midswap/.env, which the midnight-watcher
+      # prefers over reading the file. If you ever need to switch back to
+      # file-based config, re-add the volume and set SWAP_STATE_PATH.
 
     environment:
       PORT: "4000"
       HOST: "0.0.0.0"
       DB_PATH: "/data/swaps.db"
-      SWAP_STATE_PATH: "/app/swap-state.json"
       MIDNIGHT_NETWORK: "${MIDNIGHT_NETWORK:-preprod}"
+      HTLC_CONTRACT_ADDRESS: "${HTLC_CONTRACT_ADDRESS}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       # Your production domain, e.g. https://midswap.yourdomain.com
       # Added to the CORS allowed-origins list alongside the hardcoded defaults.

@@ -33,13 +33,22 @@ set -euo pipefail
 
 # ── 0. Config ─────────────────────────────────────────────────────────────────
 # Edit these before running the script.
-DOMAIN="YOUR_DOMAIN"           # e.g. midswap.yourdomain.com
-GITHUB_USERNAME="YOUR_GITHUB"  # GitHub username — used to pull from GHCR
+DOMAIN="midotc.fairway.global"   # e.g. midswap.yourdomain.com
+GITHUB_USERNAME="ermiappz"  # GitHub username — used to pull from GHCR
 GHCR_TOKEN="YOUR_GHCR_TOKEN"  # GitHub PAT with read:packages scope
 
-echo "==> [1/7] Update system packages"
+echo "==> [1/7] Update system packages + essential tools"
 apt-get update -qq
 apt-get upgrade -y -qq
+
+# Essential tools every server needs:
+#   curl      — used by the Docker install script + health checks
+#   git       — useful for debugging (checking what commit is deployed)
+#   ufw       — simple firewall frontend (we configure it below)
+#   unzip     — needed by some package post-install scripts
+#   htop      — human-readable process/memory monitor (ops quality of life)
+#   jq        — parse JSON on the command line (useful for API debugging)
+apt-get install -y curl git ufw unzip htop jq
 
 # ── 1. Docker ─────────────────────────────────────────────────────────────────
 echo "==> [2/7] Install Docker"
@@ -103,8 +112,9 @@ sudo -u deploy bash -c 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/auth
 # ── 5. Midswap directories ───────────────────────────────────────────────────
 echo "==> [6/7] Create /opt/midswap"
 mkdir -p /opt/midswap/data
-# The deploy user owns /opt/midswap so it can write docker-compose.yml and
-# pull updated images without needing sudo.
+mkdir -p /opt/midswap/scripts   # GitHub Actions SCPs deploy.sh here on every push
+# The deploy user owns /opt/midswap so it can write docker-compose.yml,
+# pull updated images, and execute deploy.sh without needing sudo.
 chown -R deploy:deploy /opt/midswap
 
 # Copy docker-compose.yml template into place (GitHub Actions keeps it updated).
@@ -126,7 +136,21 @@ EOF
     chmod 600 /opt/midswap/.env
 fi
 
-# ── 6. GHCR authentication ───────────────────────────────────────────────────
+# ── 6. Firewall ──────────────────────────────────────────────────────────────
+echo "==> Configuring UFW firewall"
+# UFW (Uncomplicated Firewall) is a frontend for iptables.
+# GCP also has a network-level firewall — UFW adds a second layer on the VM itself.
+# Rule: deny everything incoming by default, then punch specific holes.
+ufw --force reset
+ufw default deny incoming   # block all inbound traffic unless explicitly allowed
+ufw default allow outgoing  # the VM can initiate outbound connections freely
+ufw allow ssh               # port 22 — needed for gcloud ssh + GitHub Actions deploy
+ufw allow http              # port 80 — needed for Certbot ACME challenge + redirect
+ufw allow https             # port 443 — the real app traffic
+# Note: port 4000 (orchestrator) is NOT opened — it's internal only, reached via Nginx
+ufw --force enable
+
+# ── 7. GHCR authentication ───────────────────────────────────────────────────
 # The VM needs to log in to GitHub Container Registry once so it can pull
 # private images in future deploys without interactive credentials.
 # Using the deploy user so the credentials are stored in /home/deploy/.docker/
