@@ -99,6 +99,13 @@ fi
 # Add deploy to docker group (no sudo needed for docker compose)
 usermod -aG docker deploy
 
+# Grant deploy passwordless sudo — required because GitHub Actions runs
+# non-interactive commands (sudo nginx -t, sudo certbot, sudo cp, etc.)
+# and there is no human to type a password. The account is locked (no
+# password login), so the only way in is via the SSH key we control.
+echo 'deploy ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/deploy
+chmod 440 /etc/sudoers.d/deploy
+
 # Grant deploy write access to the UI static-file directory
 chown -R deploy:www-data /var/www/midswap
 chmod -R 775 /var/www/midswap

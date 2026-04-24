@@ -175,7 +175,7 @@ jobs:
     # "production" is a GitHub Environment — it lets you require manual approval
     # for deploys and restricts which secrets are available. Create it at:
     # Settings → Environments → New environment → "production"
-    environment: production
+    environment: prod
 
     steps:
       - uses: actions/checkout@v4
