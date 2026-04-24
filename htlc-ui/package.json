@@ -10,6 +10,8 @@
     "predev": "npm run copy-zk-assets",
     "prebuild": "npm run copy-zk-assets",
     "build": "rm -rf ./dist && tsc && vite build --mode preprod",
+    "fix-libsodium": "mkdir -p ../node_modules/libsodium-wrappers-sumo/dist/modules-sumo-esm && rm -f ../node_modules/libsodium-wrappers-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs && cp ../node_modules/libsodium-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs ../node_modules/libsodium-wrappers-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs",
+    "build:vercel": "npm run fix-libsodium && rm -rf ./dist && tsc && vite build --mode preprod",
     "build:preview": "rm -rf ./dist && tsc && vite build --mode preview",
     "build:start": "npm run build && npm run start",
     "build:start:preview": "npm run build:preview && npm run start",

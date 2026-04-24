@@ -1,0 +1,8 @@
+{
+  "installCommand": "npm install",
+  "buildCommand": "npm run build:vercel --workspace=htlc-ui",
+  "outputDirectory": "htlc-ui/dist",
+  "rewrites": [
+    { "source": "/((?!assets/|keys/|zkir/|plutus\\.json|favicon\\.|.*\\.[a-zA-Z0-9]+$).*)", "destination": "/index.html" }
+  ]
+}

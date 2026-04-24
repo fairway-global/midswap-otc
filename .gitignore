@@ -76,3 +76,4 @@ pending-swap.json
 
 # Compact
 managed/
+.vercel
