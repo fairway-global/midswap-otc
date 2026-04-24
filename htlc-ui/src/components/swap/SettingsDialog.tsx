@@ -51,7 +51,7 @@ export const SettingsDialog: React.FC<Props> = ({ open, onClose, deadlineMin, on
               Cardano deadline
             </Typography>
             <Typography variant="caption" sx={{ color: theme.custom.textMuted }}>
-              How long the ADA lock stays open. The counterparty&apos;s Midnight deadline is nested strictly inside with
+              How long the USDM lock stays open. The counterparty&apos;s Midnight deadline is nested strictly inside with
               a {limits.bobSafetyBufferSecs}s safety buffer.
             </Typography>
             <Stack direction="row" spacing={1}>

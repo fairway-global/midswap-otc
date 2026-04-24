@@ -6,15 +6,15 @@ CREATE TABLE IF NOT EXISTS swaps (
   hash                  TEXT PRIMARY KEY,
 
   -- Flow direction — set at creation, never changes.
-  --   'ada-usdc' — maker locks ADA on Cardano first, taker deposits USDC on Midnight
-  --   'usdc-ada' — maker deposits USDC on Midnight first, taker locks ADA on Cardano
-  direction             TEXT NOT NULL DEFAULT 'ada-usdc'
-                          CHECK (direction IN ('ada-usdc', 'usdc-ada')),
+  --   'usdm-usdc' — maker locks ADA on Cardano first, taker deposits USDC on Midnight
+  --   'usdc-usdm' — maker deposits USDC on Midnight first, taker locks ADA on Cardano
+  direction             TEXT NOT NULL DEFAULT 'usdm-usdc'
+                          CHECK (direction IN ('usdm-usdc', 'usdc-usdm')),
 
   -- Maker's Midnight credentials (always set at creation, regardless of direction).
   alice_cpk             TEXT NOT NULL,
   alice_unshielded      TEXT NOT NULL,
-  ada_amount            TEXT NOT NULL,
+  usdm_amount            TEXT NOT NULL,
   usdc_amount           TEXT NOT NULL,
 
   -- Cardano side. See field-semantics table in CLAUDE.md / contract.md.

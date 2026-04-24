@@ -12,7 +12,7 @@ export type SwapStatus =
  *   ada-usdc: maker locks ADA on Cardano first, taker deposits USDC on Midnight
  *   usdc-ada: maker deposits USDC on Midnight first, taker locks ADA on Cardano
  */
-export type FlowDirection = 'ada-usdc' | 'usdc-ada';
+export type FlowDirection = 'usdm-usdc' | 'usdc-usdm';
 
 export interface Swap {
   hash: string;
@@ -20,7 +20,7 @@ export interface Swap {
 
   aliceCpk: string;
   aliceUnshielded: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
 
   // Cardano side:
@@ -69,7 +69,7 @@ export interface CreateSwapBody {
 
   aliceCpk: string;
   aliceUnshielded: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
 
   cardanoDeadlineMs?: number;

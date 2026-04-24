@@ -2,14 +2,14 @@
  * Midswap swap card — a Uniswap-style dual-input card that supports the full
  * bidirectional atomic-swap protocol.
  *
- *   ada-usdc flow (default)
- *     Maker locks ADA on Cardano; taker deposits USDC on Midnight; maker
- *     claims USDC (reveals preimage on Midnight); taker claims ADA on
+ *   usdm-usdc flow (default)
+ *     Maker locks USDM on Cardano; taker deposits USDC on Midnight; maker
+ *     claims USDC (reveals preimage on Midnight); taker claims USDM on
  *     Cardano using the revealed preimage.
  *
- *   usdc-ada flow (click flip)
- *     Maker deposits USDC on Midnight; taker locks ADA on Cardano; maker
- *     claims ADA (reveals preimage via Cardano tx redeemer); taker claims
+ *   usdc-usdm flow (click flip)
+ *     Maker deposits USDC on Midnight; taker locks USDM on Cardano; maker
+ *     claims USDM (reveals preimage via Cardano tx redeemer); taker claims
  *     USDC on Midnight using the preimage read back from Blockfrost.
  *
  * Role is derived from URL: `?hash=` present → taker, otherwise maker.
@@ -112,10 +112,18 @@ export const SwapCard: React.FC = () => {
   // Role comes from URL (hash present → taker). Flow direction comes from
   // either the URL `direction` param (taker) or local state (maker flip).
   const hashInUrl = !!searchParams.get('hash');
-  const urlDirection = (searchParams.get('direction') as FlowDirection | null) ?? 'ada-usdc';
+  // Read-side alias: older shared URLs carry direction=ada-usdc / usdc-ada.
+  // Map them to the current tokens so in-flight preprod links keep resolving.
+  const rawDirection = searchParams.get('direction');
+  const urlDirection: FlowDirection =
+    rawDirection === 'ada-usdc'
+      ? 'usdm-usdc'
+      : rawDirection === 'usdc-ada'
+        ? 'usdc-usdm'
+        : (rawDirection as FlowDirection | null) ?? 'usdm-usdc';
   const role: Role = hashInUrl ? 'taker' : 'maker';
 
-  const [flowDirection, setFlowDirection] = useState<FlowDirection>(hashInUrl ? urlDirection : 'ada-usdc');
+  const [flowDirection, setFlowDirection] = useState<FlowDirection>(hashInUrl ? urlDirection : 'usdm-usdc');
 
   // Keep flowDirection synced with URL for taker mode.
   useEffect(() => {
@@ -129,7 +137,7 @@ export const SwapCard: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
 
   // Maker-only local form.
-  const [adaAmount, setAdaAmount] = useState('1');
+  const [usdmAmount, setUsdmAmount] = useState('1');
   const [usdcAmount, setUsdcAmount] = useState('1');
   const [deadlineMin, setDeadlineMin] = useState(limits.aliceDefaultDeadlineMin.toString());
 
@@ -159,10 +167,10 @@ export const SwapCard: React.FC = () => {
   // Open the progress modal whenever the active flow transitions out of idle.
   const activeState =
     role === 'maker'
-      ? flowDirection === 'ada-usdc'
+      ? flowDirection === 'usdm-usdc'
         ? fwdMaker.state
         : revMaker.state
-      : flowDirection === 'ada-usdc'
+      : flowDirection === 'usdm-usdc'
         ? fwdTaker.state
         : revTaker.state;
 
@@ -174,20 +182,20 @@ export const SwapCard: React.FC = () => {
 
   // Taker URL parsing — forward or reverse depending on the `direction` param.
   const fwdUrl = useMemo(() => {
-    if (role !== 'taker' || flowDirection !== 'ada-usdc') return undefined;
+    if (role !== 'taker' || flowDirection !== 'usdm-usdc') return undefined;
     const parsed = parseUrlInputs(searchParams);
     return 'error' in parsed ? undefined : parsed;
   }, [searchParams, role, flowDirection]);
 
   const revUrl = useMemo(() => {
-    if (role !== 'taker' || flowDirection !== 'usdc-ada') return undefined;
+    if (role !== 'taker' || flowDirection !== 'usdc-usdm') return undefined;
     const parsed = parseReverseUrl(searchParams);
     return 'error' in parsed ? undefined : parsed;
   }, [searchParams, role, flowDirection]);
 
   const urlError = useMemo(() => {
     if (role !== 'taker') return undefined;
-    if (flowDirection === 'ada-usdc') {
+    if (flowDirection === 'usdm-usdc') {
       const parsed = parseUrlInputs(searchParams);
       return 'error' in parsed ? parsed.error : undefined;
     }
@@ -198,10 +206,10 @@ export const SwapCard: React.FC = () => {
   // Auto-start the correct taker flow when wallets + URL are ready.
   useEffect(() => {
     if (role !== 'taker' || !session || !cardano) return;
-    if (flowDirection === 'ada-usdc' && fwdUrl && fwdTaker.state.kind === 'idle') {
+    if (flowDirection === 'usdm-usdc' && fwdUrl && fwdTaker.state.kind === 'idle') {
       fwdTaker.start(fwdUrl);
       setModalOpen(true);
-    } else if (flowDirection === 'usdc-ada' && revUrl && revTaker.state.kind === 'idle') {
+    } else if (flowDirection === 'usdc-usdm' && revUrl && revTaker.state.kind === 'idle') {
       revTaker.start(revUrl);
       setModalOpen(true);
     }
@@ -210,12 +218,12 @@ export const SwapCard: React.FC = () => {
   // Amounts shown in taker mode come from the URL.
   const takerPayValue = (() => {
     if (role !== 'taker') return '';
-    if (flowDirection === 'ada-usdc') return fwdUrl ? fwdUrl.usdcAmount.toString() : '';
-    return revUrl ? revUrl.adaAmount.toString() : '';
+    if (flowDirection === 'usdm-usdc') return fwdUrl ? fwdUrl.usdcAmount.toString() : '';
+    return revUrl ? revUrl.usdmAmount.toString() : '';
   })();
   const takerReceiveValue = (() => {
     if (role !== 'taker') return '';
-    if (flowDirection === 'ada-usdc') return fwdUrl ? fwdUrl.adaAmount.toString() : '';
+    if (flowDirection === 'usdm-usdc') return fwdUrl ? fwdUrl.usdmAmount.toString() : '';
     return revUrl ? revUrl.usdcAmount.toString() : '';
   })();
 
@@ -236,7 +244,7 @@ export const SwapCard: React.FC = () => {
 
   const onSubmitMaker = useCallback(async () => {
     try {
-      const ada = BigInt(adaAmount || '0');
+      const ada = BigInt(usdmAmount || '0');
       const usdc = BigInt(usdcAmount || '0');
       const min = parseInt(deadlineMin, 10);
       if (ada <= 0n || usdc <= 0n) throw new Error('Enter positive amounts for both sides.');
@@ -244,13 +252,13 @@ export const SwapCard: React.FC = () => {
         throw new Error(`Deadline must be ≥ ${limits.aliceMinDeadlineMin} minutes.`);
       }
 
-      if (flowDirection === 'ada-usdc') {
+      if (flowDirection === 'usdm-usdc') {
         if (!resolvedCounterpartyPkh) {
           throw new Error("Paste the counterparty's Cardano address or 56-hex PKH.");
         }
         setModalOpen(true);
         await fwdMaker.lock({
-          adaAmount: ada,
+          usdmAmount: ada,
           usdcAmount: usdc,
           deadlineMin: min,
           counterpartyPkh: resolvedCounterpartyPkh,
@@ -264,7 +272,7 @@ export const SwapCard: React.FC = () => {
         }
         setModalOpen(true);
         await revMaker.deposit({
-          adaAmount: ada,
+          usdmAmount: ada,
           usdcAmount: usdc,
           deadlineMin: min,
           counterpartyCpkBytes: resolvedCounterpartyMidnightCpkBytes,
@@ -275,7 +283,7 @@ export const SwapCard: React.FC = () => {
       toast.error(e instanceof Error ? e.message : String(e));
     }
   }, [
-    adaAmount,
+    usdmAmount,
     usdcAmount,
     deadlineMin,
     flowDirection,
@@ -292,19 +300,19 @@ export const SwapCard: React.FC = () => {
     if (role === 'taker') {
       // Flipping in taker mode clears the URL and returns to maker mode.
       setSearchParams(new URLSearchParams());
-      setFlowDirection('ada-usdc');
+      setFlowDirection('usdm-usdc');
       return;
     }
     // Disallow flipping while an active maker flow is in flight — it would
     // orphan the preimage / pending swap.
     if (
-      (flowDirection === 'ada-usdc' && fwdMaker.state.kind !== 'idle' && fwdMaker.state.kind !== 'error') ||
-      (flowDirection === 'usdc-ada' && revMaker.state.kind !== 'idle' && revMaker.state.kind !== 'error')
+      (flowDirection === 'usdm-usdc' && fwdMaker.state.kind !== 'idle' && fwdMaker.state.kind !== 'error') ||
+      (flowDirection === 'usdc-usdm' && revMaker.state.kind !== 'idle' && revMaker.state.kind !== 'error')
     ) {
       toast.warning('Finish or discard the in-flight swap before flipping direction.');
       return;
     }
-    setFlowDirection((d) => (d === 'ada-usdc' ? 'usdc-ada' : 'ada-usdc'));
+    setFlowDirection((d) => (d === 'usdm-usdc' ? 'usdc-usdm' : 'usdm-usdc'));
   }, [role, flowDirection, fwdMaker.state.kind, revMaker.state.kind, setSearchParams, toast]);
 
   const onStartOver = useCallback(() => {
@@ -314,7 +322,7 @@ export const SwapCard: React.FC = () => {
     fwdTaker.reset();
     revMaker.reset();
     revTaker.reset();
-    setFlowDirection('ada-usdc');
+    setFlowDirection('usdm-usdc');
   }, [fwdMaker, fwdTaker, revMaker, revTaker, setSearchParams]);
 
   const walletsReady = !!session && !!cardano;
@@ -354,11 +362,11 @@ export const SwapCard: React.FC = () => {
       </AsyncButton>
     );
   } else if (role === 'maker') {
-    const ada = Number(adaAmount || '0');
+    const usdm = Number(usdmAmount || '0');
     const usdc = Number(usdcAmount || '0');
-    const hasAmounts = ada > 0 && usdc > 0;
+    const hasAmounts = usdm > 0 && usdc > 0;
     const hasCounterparty =
-      flowDirection === 'ada-usdc'
+      flowDirection === 'usdm-usdc'
         ? !!resolvedCounterpartyPkh
         : !!resolvedCounterpartyMidnightCpkBytes && !!resolvedCounterpartyMidnightUnshieldedBytes;
     if (!hasAmounts) {
@@ -370,11 +378,11 @@ export const SwapCard: React.FC = () => {
     } else if (!hasCounterparty) {
       cta = (
         <Button variant="contained" color="primary" size="large" fullWidth disabled>
-          {flowDirection === 'ada-usdc' ? 'Enter counterparty Cardano address' : 'Enter counterparty Midnight keys'}
+          {flowDirection === 'usdm-usdc' ? 'Enter counterparty Cardano address' : 'Enter counterparty Midnight keys'}
         </Button>
       );
     } else {
-      const label = flowDirection === 'ada-usdc' ? `Review & lock ${ada} ADA` : `Review & deposit ${usdc} USDC`;
+      const label = flowDirection === 'usdm-usdc' ? `Review & lock ${usdm} USDM` : `Review & deposit ${usdc} USDC`;
       cta = (
         <AsyncButton
           variant="contained"
@@ -399,9 +407,9 @@ export const SwapCard: React.FC = () => {
 
   // Restore notice (either maker hook may have pending state).
   const restoreNotice =
-    role === 'maker' ? (flowDirection === 'ada-usdc' ? fwdMaker.restoreNotice : revMaker.restoreNotice) : undefined;
+    role === 'maker' ? (flowDirection === 'usdm-usdc' ? fwdMaker.restoreNotice : revMaker.restoreNotice) : undefined;
   const onForgetPending = useCallback(() => {
-    if (flowDirection === 'ada-usdc') fwdMaker.forgetPending();
+    if (flowDirection === 'usdm-usdc') fwdMaker.forgetPending();
     else revMaker.forgetPending();
     onStartOver();
   }, [flowDirection, fwdMaker, revMaker, onStartOver]);
@@ -454,12 +462,12 @@ export const SwapCard: React.FC = () => {
 
   const directionBadge =
     role === 'maker'
-      ? flowDirection === 'ada-usdc'
-        ? 'ADA → USDC'
-        : 'USDC → ADA'
-      : flowDirection === 'ada-usdc'
-        ? 'Take ADA → USDC'
-        : 'Take USDC → ADA';
+      ? flowDirection === 'usdm-usdc'
+        ? 'USDM → USDC'
+        : 'USDC → USDM'
+      : flowDirection === 'usdm-usdc'
+        ? 'Take USDM → USDC'
+        : 'Take USDC → USDM';
 
   return (
     <>
@@ -532,8 +540,8 @@ export const SwapCard: React.FC = () => {
             <Stack spacing={0.5}>
               <TokenRow
                 label="You pay"
-                value={role === 'maker' ? (flowDirection === 'ada-usdc' ? adaAmount : usdcAmount) : takerPayValue}
-                onChange={role === 'maker' ? (flowDirection === 'ada-usdc' ? setAdaAmount : setUsdcAmount) : undefined}
+                value={role === 'maker' ? (flowDirection === 'usdm-usdc' ? usdmAmount : usdcAmount) : takerPayValue}
+                onChange={role === 'maker' ? (flowDirection === 'usdm-usdc' ? setUsdmAmount : setUsdcAmount) : undefined}
                 token={pair.pay}
                 readOnly={role === 'taker'}
                 helper={payRowHelper(role, flowDirection)}
@@ -541,8 +549,8 @@ export const SwapCard: React.FC = () => {
               />
               <TokenRow
                 label="You receive"
-                value={role === 'maker' ? (flowDirection === 'ada-usdc' ? usdcAmount : adaAmount) : takerReceiveValue}
-                onChange={role === 'maker' ? (flowDirection === 'ada-usdc' ? setUsdcAmount : setAdaAmount) : undefined}
+                value={role === 'maker' ? (flowDirection === 'usdm-usdc' ? usdcAmount : usdmAmount) : takerReceiveValue}
+                onChange={role === 'maker' ? (flowDirection === 'usdm-usdc' ? setUsdcAmount : setUsdmAmount) : undefined}
                 token={pair.receive}
                 readOnly={role === 'taker'}
                 helper={receiveRowHelper(role, flowDirection)}
@@ -553,9 +561,9 @@ export const SwapCard: React.FC = () => {
               title={
                 role === 'taker'
                   ? 'Flipping will discard the offer URL'
-                  : flowDirection === 'ada-usdc'
-                    ? 'Flip to USDC → ADA (offer USDC for ADA)'
-                    : 'Flip to ADA → USDC (offer ADA for USDC)'
+                  : flowDirection === 'usdm-usdc'
+                    ? 'Flip to USDC → USDM (offer USDC for USDM)'
+                    : 'Flip to USDM → USDC (offer USDM for USDC)'
               }
             >
               <IconButton
@@ -581,7 +589,7 @@ export const SwapCard: React.FC = () => {
           </Box>
 
           {/* Counterparty input — differs by direction */}
-          {role === 'maker' && flowDirection === 'ada-usdc' && (
+          {role === 'maker' && flowDirection === 'usdm-usdc' && (
             <Box sx={{ mt: 2 }}>
               <Typography
                 sx={{
@@ -605,7 +613,7 @@ export const SwapCard: React.FC = () => {
                 error={counterpartyCardano.trim().length > 0 && !resolvedCounterpartyPkh}
                 helperText={
                   counterpartyCardano.trim().length === 0
-                    ? 'Bind the ADA lock to their Cardano wallet.'
+                    ? 'Bind the USDM lock to their Cardano wallet.'
                     : resolvedCounterpartyPkh
                       ? `PKH ${resolvedCounterpartyPkh.slice(0, 16)}…`
                       : 'Not a valid Cardano address or 56-hex PKH.'
@@ -621,7 +629,7 @@ export const SwapCard: React.FC = () => {
             </Box>
           )}
 
-          {role === 'maker' && flowDirection === 'usdc-ada' && (
+          {role === 'maker' && flowDirection === 'usdc-usdm' && (
             <Stack spacing={1.25} sx={{ mt: 2 }}>
               <Typography
                 sx={{
@@ -753,6 +761,20 @@ export const SwapCard: React.FC = () => {
           <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
             ·
           </Typography>
+          <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
+            Need USDM?
+          </Typography>
+          <Link
+            component="button"
+            underline="hover"
+            onClick={() => navigate('/mint-usdm')}
+            sx={{ fontWeight: 500, fontSize: 'inherit' }}
+          >
+            Mint on Cardano
+          </Link>
+          <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
+            ·
+          </Typography>
           <Link
             component="button"
             underline="hover"
@@ -793,22 +815,22 @@ export const SwapCard: React.FC = () => {
 
 const payRowHelper = (role: Role, dir: FlowDirection): React.ReactNode => {
   if (role === 'maker') {
-    return dir === 'ada-usdc'
+    return dir === 'usdm-usdc'
       ? 'Paid from your Cardano wallet.'
       : 'Escrowed on Midnight until the counterparty claims.';
   }
-  return dir === 'ada-usdc'
+  return dir === 'usdm-usdc'
     ? 'Escrowed on Midnight until the maker claims.'
     : 'Escrowed on Cardano until the maker claims.';
 };
 
 const receiveRowHelper = (role: Role, dir: FlowDirection): React.ReactNode => {
   if (role === 'maker') {
-    return dir === 'ada-usdc'
+    return dir === 'usdm-usdc'
       ? 'Delivered as native USDC on Midnight when you claim.'
       : 'Delivered from the counterparty’s Cardano HTLC when you claim.';
   }
-  return dir === 'ada-usdc'
+  return dir === 'usdm-usdc'
     ? 'Delivered from the maker’s Cardano HTLC when you claim.'
     : 'Delivered as native USDC on Midnight when you claim.';
 };

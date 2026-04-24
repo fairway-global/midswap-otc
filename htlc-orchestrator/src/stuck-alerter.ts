@@ -83,7 +83,7 @@ const classify = (swap: Swap, now: number, aliceClaimedStaleMs: number): StuckRe
   //   usdc-ada: maker deposited Midnight (alice_reclaim on midnightExpired);
   //             taker locked Cardano (bob_reclaim on cardanoExpired).
 
-  if (swap.direction === 'ada-usdc') {
+  if (swap.direction === 'usdm-usdc') {
     if (swap.status === 'bob_deposited' && midnightExpired) return 'bob_reclaim_available';
     if ((swap.status === 'open' || swap.status === 'bob_deposited') && cardanoExpired) {
       return 'alice_reclaim_available';
@@ -117,7 +117,7 @@ const humanReason = (reason: StuckReason): string => {
 
 const amountSummary = (swap: Swap): string => {
   const parts: string[] = [];
-  if (swap.adaAmount) parts.push(`${swap.adaAmount} ADA`);
+  if (swap.usdmAmount) parts.push(`${swap.usdmAmount} ADA`);
   if (swap.usdcAmount) parts.push(`${swap.usdcAmount} USDC`);
   return parts.join(' ⇄ ');
 };
@@ -129,7 +129,7 @@ interface AlertPayload {
   reason: StuckReason;
   reasonLabel: string;
   amountSummary: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
   cardanoDeadlineMs: number | null;
   midnightDeadlineMs: number | null;
@@ -153,7 +153,7 @@ const buildPayload = (
     reason,
     reasonLabel: humanReason(reason),
     amountSummary: amountSummary(swap),
-    adaAmount: swap.adaAmount,
+    usdmAmount: swap.usdmAmount,
     usdcAmount: swap.usdcAmount,
     cardanoDeadlineMs: swap.cardanoDeadlineMs,
     midnightDeadlineMs: swap.midnightDeadlineMs,

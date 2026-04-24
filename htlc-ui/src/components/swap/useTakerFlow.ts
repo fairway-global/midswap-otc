@@ -1,6 +1,6 @@
 /**
  * Taker flow hook — watch Cardano for the maker's lock, deposit USDC on
- * Midnight, wait for the preimage reveal, claim ADA on Cardano.
+ * Midnight, wait for the preimage reveal, claim USDM on Cardano.
  *
  * Extracted 1:1 from the original BobSwap component. Safety checks against
  * CLAUDE.md §11 (bech32m decoding, `watchForCardanoLock` filter signature,
@@ -21,7 +21,7 @@ export interface URLInputs {
   readonly aliceCpkHex: string;
   readonly aliceUnshieldedHex: string;
   readonly cardanoDeadlineMs: bigint;
-  readonly adaAmount: bigint;
+  readonly usdmAmount: bigint;
   readonly usdcAmount: bigint;
 }
 
@@ -121,20 +121,21 @@ export const parseUrlInputs = (params: URLSearchParams): URLInputs | { error: st
   const aliceCpkHex = (params.get('aliceCpk') ?? '').trim().toLowerCase();
   const aliceUnshieldedHex = (params.get('aliceUnshielded') ?? '').trim().toLowerCase();
   const cardanoDeadlineMs = params.get('cardanoDeadlineMs');
-  const adaAmount = params.get('adaAmount');
+  // Read-side alias: older URLs carry `adaAmount` — accept as fallback.
+  const usdmAmount = params.get('usdmAmount') ?? params.get('adaAmount');
   const usdcAmount = params.get('usdcAmount');
   if (!hashHex || !/^[0-9a-f]{64}$/.test(hashHex)) return { error: 'Missing or invalid hash (64 hex).' };
   if (!aliceCpkHex || !/^[0-9a-f]{64}$/.test(aliceCpkHex)) return { error: 'Missing or invalid maker key (64 hex).' };
   if (!aliceUnshieldedHex || !/^[0-9a-f]{64}$/.test(aliceUnshieldedHex))
     return { error: 'Missing or invalid maker unshielded address (64 hex).' };
-  if (!cardanoDeadlineMs || !adaAmount || !usdcAmount)
-    return { error: 'Missing cardanoDeadlineMs / adaAmount / usdcAmount.' };
+  if (!cardanoDeadlineMs || !usdmAmount || !usdcAmount)
+    return { error: 'Missing cardanoDeadlineMs / usdmAmount / usdcAmount.' };
   return {
     hashHex,
     aliceCpkHex,
     aliceUnshieldedHex,
     cardanoDeadlineMs: BigInt(cardanoDeadlineMs),
-    adaAmount: BigInt(adaAmount),
+    usdmAmount: BigInt(usdmAmount),
     usdcAmount: BigInt(usdcAmount),
   };
 };
@@ -160,6 +161,7 @@ export const useTakerFlow = (): UseTakerFlow => {
       try {
         const htlcInfo = await watchForCardanoLock(
           cardano.cardanoHtlc,
+          cardano.usdmPolicy.unit,
           cardano.paymentKeyHash,
           10_000,
           state.url.hashHex,

@@ -9,7 +9,9 @@ import {
   Constr,
   validatorToAddress,
   getAddressDetails,
+  mintingPolicyToId,
   type LucidEvolution,
+  type MintingPolicy,
   type SpendingValidator,
   type UTxO,
   type Network,
@@ -134,13 +136,19 @@ export class CardanoHTLC {
   // ── Lock (Deposit) ──────────────────────────────────────────────────
 
   /**
-   * Lock ADA at the HTLC script address.
-   * @param amountLovelace  Amount in lovelace (1 ADA = 1_000_000 lovelace)
-   * @param preimageHash    SHA-256 hash of the preimage (32 bytes hex)
-   * @param receiverPkh     Receiver's payment key hash (28 bytes hex)
-   * @param deadlineMs      POSIX deadline in milliseconds
+   * Lock `usdmQty` USDM (under `usdmUnit`) at the HTLC script address, with
+   * a small min-ADA on the UTxO to satisfy Cardano's multi-asset model. The
+   * min-ADA rides on the UTxO and is refunded to the spender at claim or
+   * reclaim time.
    */
-  async lock(amountLovelace: bigint, preimageHash: string, receiverPkh: string, deadlineMs: bigint): Promise<string> {
+  async lock(
+    usdmQty: bigint,
+    usdmUnit: string,
+    preimageHash: string,
+    receiverPkh: string,
+    deadlineMs: bigint,
+    minAdaLovelace: bigint = 2_000_000n,
+  ): Promise<string> {
     const senderPkh = await this.getPaymentKeyHash();
 
     const datum = encodeDatum({
@@ -150,7 +158,8 @@ export class CardanoHTLC {
       deadline: deadlineMs,
     });
 
-    this.logger.info(`Locking ${amountLovelace} lovelace at HTLC script...`);
+    this.logger.info(`Locking ${usdmQty} USDM (+ ${minAdaLovelace} lovelace min-UTxO) at HTLC script...`);
+    this.logger.info(`  USDM unit: ${usdmUnit.slice(0, 16)}...`);
     this.logger.info(`  Hash lock: ${preimageHash}`);
     this.logger.info(`  Sender PKH: ${senderPkh}`);
     this.logger.info(`  Receiver PKH: ${receiverPkh}`);
@@ -161,7 +170,7 @@ export class CardanoHTLC {
       .pay.ToContract(
         this.scriptAddress,
         { kind: 'inline', value: datum },
-        { lovelace: amountLovelace },
+        { lovelace: minAdaLovelace, [usdmUnit]: usdmQty },
       )
       .complete();
 
@@ -291,3 +300,56 @@ function sha256Hex(hexData: string): string {
   const bytes = Buffer.from(hexData, 'hex');
   return createHash('sha256').update(bytes).digest('hex');
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// USDM minting policy helpers — mirror of htlc-ui/src/api/cardano-usdm.ts
+// ─────────────────────────────────────────────────────────────────────
+
+/** ASCII "USDM" as hex — the on-chain asset name under the USDM policy. */
+export const USDM_ASSET_NAME_HEX = '5553444d';
+
+export interface UsdmPolicy {
+  readonly policy: MintingPolicy;
+  readonly policyId: string;
+  readonly assetNameHex: string;
+  /** `policyId + assetNameHex` — the "unit" key used in UTxO assets maps. */
+  readonly unit: string;
+}
+
+/** Load the USDM minting policy from the Aiken blueprint on disk. */
+export const loadUsdmPolicy = (blueprintPath: string): UsdmPolicy => {
+  const blueprint = JSON.parse(fs.readFileSync(blueprintPath, 'utf-8')) as {
+    validators: Array<{ title: string; compiledCode: string }>;
+  };
+  const v = blueprint.validators.find((x) => x.title === 'usdm.usdm.mint');
+  if (!v) throw new Error('usdm.usdm.mint validator not found in blueprint');
+  const policy: MintingPolicy = { type: 'PlutusV3', script: v.compiledCode };
+  const policyId = mintingPolicyToId(policy);
+  return { policy, policyId, assetNameHex: USDM_ASSET_NAME_HEX, unit: policyId + USDM_ASSET_NAME_HEX };
+};
+
+/** Mint `qty` USDM and send to `recipient` (bech32). */
+export const mintUsdm = async (
+  lucid: LucidEvolution,
+  policy: UsdmPolicy,
+  recipient: string,
+  qty: bigint,
+): Promise<string> => {
+  if (qty <= 0n) throw new Error('Mint amount must be positive.');
+  const tx = await lucid
+    .newTx()
+    .mintAssets({ [policy.unit]: qty }, Data.void())
+    .attach.MintingPolicy(policy.policy)
+    .pay.ToAddress(recipient, { [policy.unit]: qty })
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  return signed.submit();
+};
+
+/** Sum USDM across the connected wallet's UTxOs. */
+export const getUsdmBalance = async (lucid: LucidEvolution, unit: string): Promise<bigint> => {
+  const utxos = await lucid.wallet().getUtxos();
+  let total = 0n;
+  for (const u of utxos) total += u.assets[unit] ?? 0n;
+  return total;
+};

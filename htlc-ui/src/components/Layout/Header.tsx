@@ -135,7 +135,12 @@ export const Header: React.FC = () => {
             </IconButton>
           </Stack>
           <Stack spacing={0.25} sx={{ mt: 2 }}>
-            {[...NAV, { to: '/mint', label: 'Mint USDC' }, { to: '/how', label: 'How It Works' }].map(
+            {[
+              ...NAV,
+              { to: '/mint', label: 'Mint USDC' },
+              { to: '/mint-usdm', label: 'Mint USDM' },
+              { to: '/how', label: 'How It Works' },
+            ].map(
               ({ to, label }) => (
                 <Button
                   key={to}

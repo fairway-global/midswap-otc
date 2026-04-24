@@ -1,10 +1,10 @@
 /**
- * Reverse taker flow — USDC → ADA direction.
+ * Reverse taker flow — USDC → USDM direction.
  *
- * The taker holds Cardano ADA. They open the maker's share URL, verify the
+ * The taker holds Cardano USDM. They open the maker's share URL, verify the
  * maker's Midnight USDC deposit is bound to the taker's own Midnight
- * credentials, lock ADA on Cardano bound to the maker's PKH, wait for the
- * maker to claim ADA (which reveals the preimage via the tx redeemer), read
+ * credentials, lock USDM on Cardano bound to the maker's PKH, wait for the
+ * maker to claim USDM (which reveals the preimage via the tx redeemer), read
  * the preimage back via Blockfrost, then claim USDC on Midnight.
  *
  * Mirror of `useTakerFlow`.
@@ -24,7 +24,7 @@ export interface ReverseURLInputs {
   readonly makerPkh: string;
   /** Maker's Midnight HTLC deadline (ms). The taker's Cardano deadline nests inside this. */
   readonly midnightDeadlineMs: bigint;
-  readonly adaAmount: bigint;
+  readonly usdmAmount: bigint;
   readonly usdcAmount: bigint;
 }
 
@@ -169,17 +169,18 @@ export const parseReverseUrl = (params: URLSearchParams): ReverseURLInputs | { e
   const hashHex = (params.get('hash') ?? '').trim().toLowerCase();
   const makerPkh = (params.get('makerPkh') ?? '').trim().toLowerCase();
   const midnightDeadlineMs = params.get('midnightDeadlineMs');
-  const adaAmount = params.get('adaAmount');
+  // Read-side alias: older URLs carry `adaAmount` — accept as fallback.
+  const usdmAmount = params.get('usdmAmount') ?? params.get('adaAmount');
   const usdcAmount = params.get('usdcAmount');
   if (!/^[0-9a-f]{64}$/.test(hashHex)) return { error: 'Missing or invalid hash (64 hex).' };
   if (!/^[0-9a-f]{56}$/.test(makerPkh)) return { error: 'Missing or invalid maker Cardano PKH (56 hex).' };
-  if (!midnightDeadlineMs || !adaAmount || !usdcAmount)
-    return { error: 'Missing midnightDeadlineMs / adaAmount / usdcAmount.' };
+  if (!midnightDeadlineMs || !usdmAmount || !usdcAmount)
+    return { error: 'Missing midnightDeadlineMs / usdmAmount / usdcAmount.' };
   return {
     hashHex,
     makerPkh,
     midnightDeadlineMs: BigInt(midnightDeadlineMs),
-    adaAmount: BigInt(adaAmount),
+    usdmAmount: BigInt(usdmAmount),
     usdcAmount: BigInt(usdcAmount),
   };
 };
@@ -291,15 +292,15 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
     return () => controller.abort();
   }, [state, session, cardano, swapState.usdcColor]);
 
-  // Lock ADA on Cardano bound to the maker's PKH. PATCH the orchestrator with
+  // Lock USDM on Cardano bound to the maker's PKH. PATCH the orchestrator with
   // `bob_deposited` so the maker's fast-path picks it up ahead of Blockfrost.
   useEffect(() => {
     if (state.kind !== 'locking' || !cardano) return;
     void (async () => {
       try {
-        const lovelace = state.url.adaAmount * 1_000_000n;
         const txHash = await cardano.cardanoHtlc.lock(
-          lovelace,
+          state.url.usdmAmount,
+          cardano.usdmPolicy.unit,
           state.url.hashHex,
           state.url.makerPkh,
           state.takerDeadlineMs,

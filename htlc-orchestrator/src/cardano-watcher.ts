@@ -283,7 +283,7 @@ export const startCardanoWatcher = (
       const active = activeByHash.get(swap.hash);
 
       try {
-        if (swap.direction === 'ada-usdc') {
+        if (swap.direction === 'usdm-usdc') {
           // Forward flow. Cardano lock was made by the maker at creation.
           if (!swap.cardanoLockTx) continue; // can't happen in practice but TS is strict
           if (active) continue; // lock still unspent, nothing to do

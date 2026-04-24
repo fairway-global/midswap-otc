@@ -109,7 +109,7 @@ const buildForwardMakerPhases = (
   return [
     {
       id: 'lock',
-      title: 'Lock ADA on Cardano',
+      title: 'Lock USDM on Cardano',
       subtitle: lockSubtitle,
       status: state.kind === 'locking' ? 'active' : afterLock ? 'done' : state.kind === 'error' ? 'error' : 'pending',
     },
@@ -173,12 +173,12 @@ const buildForwardTakerPhases = (
   return [
     {
       id: 'watch',
-      title: "Verify the maker's ADA lock",
+      title: "Verify the maker's USDM lock",
       subtitle:
         state.kind === 'watching-cardano'
           ? 'Scanning Cardano for the lock bound to your wallet…'
           : afterWatch
-            ? `Found: ${(Number((state as Extract<TakerStep, { htlcInfo: unknown }>).htlcInfo.amountLovelace) / 1e6).toFixed(6)} ADA locked.`
+            ? `Found: ${(state as Extract<TakerStep, { htlcInfo: unknown }>).htlcInfo.amountUsdm.toString()} USDM locked.`
             : state.kind === 'unsafe-deadline'
               ? state.reason
               : 'Waiting for wallet connection.',
@@ -239,11 +239,11 @@ const buildForwardTakerPhases = (
     },
     {
       id: 'claim',
-      title: 'Claim ADA on Cardano',
+      title: 'Claim USDM on Cardano',
       subtitle:
         state.kind === 'done' ? (
           <>
-            Received {(Number(state.htlcInfo.amountLovelace) / 1e6).toFixed(6)} ADA. Claim tx{' '}
+            Received {state.htlcInfo.amountUsdm.toString()} USDM. Claim tx{' '}
             {txLink('cardano', state.claimTxHash)}.
           </>
         ) : afterPreimage ? (
@@ -255,7 +255,7 @@ const buildForwardTakerPhases = (
       action:
         state.kind === 'claim-ready' ? (
           <AsyncButton variant="contained" color="primary" size="large" onClick={onClaim} pendingLabel="Signing…">
-            Claim ADA
+            Claim USDM
           </AsyncButton>
         ) : undefined,
     },
@@ -302,7 +302,7 @@ const buildReverseMakerPhases = (
       title: 'Share the offer',
       subtitle:
         afterDeposit && shareUrl
-          ? 'The counterparty opens this URL and locks ADA on Cardano bound to your PKH.'
+          ? 'The counterparty opens this URL and locks USDM on Cardano bound to your PKH.'
           : 'Waiting for deposit confirmation…',
       status: afterCardanoLock ? 'done' : afterDeposit && shareUrl ? 'active' : 'pending',
       action:
@@ -312,20 +312,20 @@ const buildReverseMakerPhases = (
     },
     {
       id: 'claim',
-      title: 'Claim ADA on Cardano',
+      title: 'Claim USDM on Cardano',
       subtitle:
         state.kind === 'done' ? (
           <>Claim tx {txLink('cardano', state.claimTxHash)}. Preimage revealed via tx redeemer.</>
         ) : afterCardanoLock ? (
-          'Counterparty locked ADA — claim it now. The preimage is revealed via the Cardano tx redeemer.'
+          'Counterparty locked USDM — claim it now. The preimage is revealed via the Cardano tx redeemer.'
         ) : (
-          'Waits for the counterparty to lock ADA bound to your PKH.'
+          'Waits for the counterparty to lock USDM bound to your PKH.'
         ),
       status: state.kind === 'claiming' ? 'active' : afterClaim ? 'done' : afterCardanoLock ? 'active' : 'pending',
       action:
         state.kind === 'claim-ready' ? (
           <AsyncButton variant="contained" color="primary" size="large" onClick={onClaim} pendingLabel="Signing…">
-            Claim {(Number(state.cardanoHtlc.amountLovelace) / 1e6).toFixed(6)} ADA
+            Claim {state.cardanoHtlc.amountUsdm.toString()} USDM
           </AsyncButton>
         ) : undefined,
     },
@@ -374,9 +374,9 @@ const buildReverseTakerPhases = (
     },
     {
       id: 'lock',
-      title: 'Lock ADA on Cardano',
+      title: 'Lock USDM on Cardano',
       subtitle: afterLock
-        ? 'Locked. ADA is escrowed until the maker claims it or your deadline passes.'
+        ? 'Locked. USDM is escrowed until the maker claims it or your deadline passes.'
         : state.kind === 'locking'
           ? 'Please sign in your Cardano wallet.'
           : state.kind === 'confirm'
@@ -394,7 +394,7 @@ const buildReverseTakerPhases = (
               </Alert>
             )}
             <AsyncButton variant="contained" color="primary" size="large" onClick={onAccept} pendingLabel="Preparing…">
-              Accept & lock {state.url.adaAmount.toString()} ADA
+              Accept & lock {state.url.usdmAmount.toString()} USDM
             </AsyncButton>
           </Stack>
         ) : undefined,
@@ -460,11 +460,11 @@ export const SwapProgressModal: React.FC<Props> = (props) => {
   let phases: PhaseRow[];
   let activeKind: string;
   let errorMessage: string | undefined;
-  if (role === 'maker' && flowDirection === 'ada-usdc') {
+  if (role === 'maker' && flowDirection === 'usdm-usdc') {
     phases = buildForwardMakerPhases(fwdMaker.state, fwdMaker.shareUrl, fwdMaker.claim);
     activeKind = fwdMaker.state.kind;
     errorMessage = fwdMaker.state.kind === 'error' ? fwdMaker.state.message : undefined;
-  } else if (role === 'taker' && flowDirection === 'ada-usdc') {
+  } else if (role === 'taker' && flowDirection === 'usdm-usdc') {
     phases = buildForwardTakerPhases(fwdTaker.state, fwdTaker.accept, fwdTaker.claim, usdcColor);
     activeKind = fwdTaker.state.kind;
     errorMessage =
@@ -473,7 +473,7 @@ export const SwapProgressModal: React.FC<Props> = (props) => {
         : fwdTaker.state.kind === 'unsafe-deadline'
           ? fwdTaker.state.reason
           : undefined;
-  } else if (role === 'maker' && flowDirection === 'usdc-ada') {
+  } else if (role === 'maker' && flowDirection === 'usdc-usdm') {
     phases = buildReverseMakerPhases(revMaker.state, revMaker.shareUrl, revMaker.claim);
     activeKind = revMaker.state.kind;
     errorMessage = revMaker.state.kind === 'error' ? revMaker.state.message : undefined;
@@ -494,12 +494,12 @@ export const SwapProgressModal: React.FC<Props> = (props) => {
   const title = isDone
     ? 'Swap complete'
     : role === 'maker'
-      ? flowDirection === 'ada-usdc'
-        ? 'Making an ADA → USDC offer'
-        : 'Making a USDC → ADA offer'
-      : flowDirection === 'ada-usdc'
-        ? 'Taking an ADA → USDC offer'
-        : 'Taking a USDC → ADA offer';
+      ? flowDirection === 'usdm-usdc'
+        ? 'Making a USDM → USDC offer'
+        : 'Making a USDC → USDM offer'
+      : flowDirection === 'usdm-usdc'
+        ? 'Taking a USDM → USDC offer'
+        : 'Taking a USDC → USDM offer';
 
   const subtitle = `${pay.symbol} on ${pay.chain} → ${receive.symbol} on ${receive.chain}`;
 

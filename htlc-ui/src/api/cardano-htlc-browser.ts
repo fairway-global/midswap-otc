@@ -138,7 +138,7 @@ export class CardanoHTLCBrowser {
   }
 
   /**
-   * Reverse-flow helper — when the maker (of a USDC→ADA swap) claims ADA on
+   * Reverse-flow helper — when the maker (of a USDC→USDM swap) claims USDM on
    * Cardano they reveal the preimage via the tx redeemer. The taker reads it
    * back here so they can claim USDC on Midnight.
    *
@@ -226,15 +226,34 @@ export class CardanoHTLCBrowser {
     return total;
   }
 
-  async lock(amountLovelace: bigint, preimageHash: string, receiverPkh: string, deadlineMs: bigint): Promise<string> {
+  /**
+   * Lock `usdmQty` USDM (under `usdmUnit` = policyId+assetName) at the HTLC
+   * script address, with a small min-ADA to satisfy Cardano's UTxO model.
+   * The min-ADA is refunded alongside the USDM at claim or reclaim time.
+   */
+  async lock(
+    usdmQty: bigint,
+    usdmUnit: string,
+    preimageHash: string,
+    receiverPkh: string,
+    deadlineMs: bigint,
+    minAdaLovelace: bigint = 2_000_000n,
+  ): Promise<string> {
     const senderPkh = await this.getPaymentKeyHash();
     const datum = encodeDatum({ preimageHash, sender: senderPkh, receiver: receiverPkh, deadline: deadlineMs });
 
-    this.logger.info({ amountLovelace, preimageHash, senderPkh, receiverPkh, deadlineMs }, 'CardanoHTLC: lock');
+    this.logger.info(
+      { usdmQty, usdmUnit: usdmUnit.slice(0, 16), minAdaLovelace, preimageHash, senderPkh, receiverPkh, deadlineMs },
+      'CardanoHTLC: lock',
+    );
 
     const tx = await this.lucid
       .newTx()
-      .pay.ToContract(this.scriptAddress, { kind: 'inline', value: datum }, { lovelace: amountLovelace })
+      .pay.ToContract(
+        this.scriptAddress,
+        { kind: 'inline', value: datum },
+        { lovelace: minAdaLovelace, [usdmUnit]: usdmQty },
+      )
       .complete();
 
     const signed = await tx.sign.withWallet().complete();
@@ -262,7 +281,10 @@ export class CardanoHTLCBrowser {
     const datum = decodeDatum(utxo.datum!);
     const walletAddr = await this.getWalletAddress();
 
-    this.logger.info({ hashHex, amountLovelace: utxo.assets.lovelace }, 'CardanoHTLC: claim');
+    this.logger.info(
+      { hashHex, assets: utxo.assets },
+      'CardanoHTLC: claim',
+    );
 
     // `validTo` must satisfy:   current_slot < validTo < datum.deadline
     // The Aiken validator checks `upper_bound < deadline` (strict).
@@ -318,7 +340,10 @@ export class CardanoHTLCBrowser {
     const datum = decodeDatum(utxo.datum!);
     const walletAddr = await this.getWalletAddress();
 
-    this.logger.info({ preimageHash, amountLovelace: utxo.assets.lovelace }, 'CardanoHTLC: reclaim');
+    this.logger.info(
+      { preimageHash, assets: utxo.assets },
+      'CardanoHTLC: reclaim',
+    );
 
     const redeemer = reclaimRedeemer();
     // +1s slot offset — see CLI comment in htlc-ft-cli/src/cardano-htlc.ts.

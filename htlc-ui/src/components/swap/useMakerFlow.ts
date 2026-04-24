@@ -1,5 +1,5 @@
 /**
- * Maker flow hook — lock ADA on Cardano, watch Midnight for the taker's USDC
+ * Maker flow hook — lock USDM on Cardano, watch Midnight for the taker's USDC
  * deposit, claim USDC (revealing the preimage).
  *
  * Extracted 1:1 from the original AliceSwap component. The reducer / effects /
@@ -15,7 +15,7 @@ import { bytesToHex, hexToBytes } from '../../api/key-encoding';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 
 export interface MakerLockParams {
-  readonly adaAmount: bigint;
+  readonly usdmAmount: bigint;
   readonly usdcAmount: bigint;
   readonly deadlineMin: number;
   readonly counterpartyPkh: string;
@@ -30,7 +30,7 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
     }
   | {
@@ -39,7 +39,7 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
     }
   | {
@@ -48,7 +48,7 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
       depositAmount: bigint;
       depositColorHex: string;
@@ -59,12 +59,12 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
       depositAmount: bigint;
       depositColorHex: string;
     }
-  | { kind: 'done'; hashHex: string; lockTxHash: string; adaAmount: bigint; depositAmount: bigint }
+  | { kind: 'done'; hashHex: string; lockTxHash: string; usdmAmount: bigint; depositAmount: bigint }
   | { kind: 'error'; message: string };
 
 type MakerAction =
@@ -105,7 +105,7 @@ const reducer = (state: MakerStep, action: MakerAction): MakerStep => {
             kind: 'done',
             hashHex: state.hashHex,
             lockTxHash: state.lockTxHash,
-            adaAmount: state.adaAmount,
+            usdmAmount: state.usdmAmount,
             depositAmount: action.depositAmount,
           }
         : state;
@@ -125,7 +125,7 @@ interface PersistedSwap {
   preimageHex: string;
   lockTxHash: string;
   deadlineMs: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
 }
 
@@ -226,7 +226,8 @@ export const useMakerFlow = (): UseMakerFlow => {
           preimageHex: pending.preimageHex,
           lockTxHash: pending.lockTxHash,
           deadlineMs: BigInt(pending.deadlineMs),
-          adaAmount: BigInt(pending.adaAmount),
+          // Legacy restore: pre-USDM records stored the amount as `adaAmount`.
+          usdmAmount: BigInt(pending.usdmAmount ?? (pending as unknown as { adaAmount: string }).adaAmount),
           usdcAmount: BigInt(pending.usdcAmount),
         },
       });
@@ -253,7 +254,7 @@ export const useMakerFlow = (): UseMakerFlow => {
     url.searchParams.set('aliceCpk', session.bootstrap.coinPublicKeyHex);
     url.searchParams.set('aliceUnshielded', session.bootstrap.unshieldedAddressHex);
     url.searchParams.set('cardanoDeadlineMs', state.deadlineMs.toString());
-    url.searchParams.set('adaAmount', state.adaAmount.toString());
+    url.searchParams.set('usdmAmount', state.usdmAmount.toString());
     url.searchParams.set('usdcAmount', state.usdcAmount.toString());
     return url.toString();
   }, [session, state]);
@@ -270,16 +271,21 @@ export const useMakerFlow = (): UseMakerFlow => {
         const hashHex = bytesToHex(hashLock);
         const preimageHex = bytesToHex(preimage);
         const deadlineMs = BigInt(Date.now() + params.deadlineMin * 60 * 1000);
-        const lovelace = params.adaAmount * 1_000_000n;
 
-        const lockTxHash = await cardano.cardanoHtlc.lock(lovelace, hashHex, params.counterpartyPkh, deadlineMs);
+        const lockTxHash = await cardano.cardanoHtlc.lock(
+          params.usdmAmount,
+          cardano.usdmPolicy.unit,
+          hashHex,
+          params.counterpartyPkh,
+          deadlineMs,
+        );
 
         savePending(session.bootstrap.coinPublicKeyHex, {
           hashHex,
           preimageHex,
           lockTxHash,
           deadlineMs: deadlineMs.toString(),
-          adaAmount: params.adaAmount.toString(),
+          usdmAmount: params.usdmAmount.toString(),
           usdcAmount: params.usdcAmount.toString(),
         });
 
@@ -287,10 +293,10 @@ export const useMakerFlow = (): UseMakerFlow => {
           () =>
             orchestratorClient.createSwap({
               hash: hashHex,
-              direction: 'ada-usdc',
+              direction: 'usdm-usdc',
               aliceCpk: session.bootstrap.coinPublicKeyHex,
               aliceUnshielded: session.bootstrap.unshieldedAddressHex,
-              adaAmount: params.adaAmount.toString(),
+              usdmAmount: params.usdmAmount.toString(),
               usdcAmount: params.usdcAmount.toString(),
               cardanoDeadlineMs: Number(deadlineMs),
               cardanoLockTx: lockTxHash,
@@ -307,7 +313,7 @@ export const useMakerFlow = (): UseMakerFlow => {
             preimageHex,
             lockTxHash,
             deadlineMs,
-            adaAmount: params.adaAmount,
+            usdmAmount: params.usdmAmount,
             usdcAmount: params.usdcAmount,
           },
         });

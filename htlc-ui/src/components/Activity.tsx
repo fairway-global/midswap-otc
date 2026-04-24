@@ -32,7 +32,7 @@ import { statusLabel, SwapStatusChip } from './SwapStatusChip';
 interface Aggregate {
   total: number;
   byStatus: Record<SwapStatus, number>;
-  totalAda: bigint;
+  totalUsdm: bigint;
   totalUsdc: bigint;
   stuck: number;
 }
@@ -97,13 +97,13 @@ export const Activity: React.FC = () => {
   const aggregate = useMemo<Aggregate | undefined>(() => {
     if (!swaps) return undefined;
     const byStatus: Record<SwapStatus, number> = { ...ZERO_BY_STATUS };
-    let totalAda = 0n;
+    let totalUsdm = 0n;
     let totalUsdc = 0n;
     let stuck = 0;
     for (const s of swaps) {
       byStatus[s.status]++;
       try {
-        totalAda += BigInt(s.adaAmount);
+        totalUsdm += BigInt(s.usdmAmount);
         totalUsdc += BigInt(s.usdcAmount);
       } catch {
         /* ignore */
@@ -119,7 +119,7 @@ export const Activity: React.FC = () => {
         (s.status === 'alice_claimed' && (cardanoExpired || midnightExpired));
       if (isStuck) stuck++;
     }
-    return { total: swaps.length, byStatus, totalAda, totalUsdc, stuck };
+    return { total: swaps.length, byStatus, totalUsdm, totalUsdc, stuck };
   }, [swaps, nowMs]);
 
   const txLink = (chain: 'midnight' | 'cardano', hash: string | null): React.ReactNode => {
@@ -217,7 +217,7 @@ export const Activity: React.FC = () => {
           <MetricCard
             label="Total tracked"
             value={aggregate.total.toString()}
-            hint={`${aggregate.totalAda.toString()} ADA · ${aggregate.totalUsdc.toString()} USDC`}
+            hint={`${aggregate.totalUsdm.toString()} USDM · ${aggregate.totalUsdc.toString()} USDC`}
           />
           <MetricCard
             label="Completed"
@@ -285,7 +285,7 @@ export const Activity: React.FC = () => {
                 <TableCell>Hash</TableCell>
                 <TableCell>Dir</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell align="right">ADA</TableCell>
+                <TableCell align="right">USDM</TableCell>
                 <TableCell align="right">USDC</TableCell>
                 <TableCell>Age</TableCell>
                 <TableCell>Deadlines</TableCell>
@@ -304,12 +304,12 @@ export const Activity: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Chip size="small" variant="outlined" label={s.direction === 'ada-usdc' ? 'A→U' : 'U→A'} />
+                    <Chip size="small" variant="outlined" label={s.direction === 'usdm-usdc' ? 'M→U' : 'U→M'} />
                   </TableCell>
                   <TableCell>
                     <SwapStatusChip status={s.status} />
                   </TableCell>
-                  <TableCell align="right">{s.adaAmount}</TableCell>
+                  <TableCell align="right">{s.usdmAmount}</TableCell>
                   <TableCell align="right">{s.usdcAmount}</TableCell>
                   <TableCell>{formatAge(s.createdAt)}</TableCell>
                   <TableCell>

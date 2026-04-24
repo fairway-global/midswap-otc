@@ -6,6 +6,7 @@ import { Home } from './components/Home';
 import { Browse } from './components/Browse';
 import { Reclaim } from './components/Reclaim';
 import { MintUsdc } from './components/MintUsdc';
+import { MintUsdm } from './components/MintUsdm';
 import { HowTo } from './components/HowTo';
 import { Activity } from './components/Activity';
 
@@ -38,6 +39,7 @@ const App: React.FC = () => (
               <Route path="/activity" element={<Activity />} />
               <Route path="/reclaim" element={<Reclaim />} />
               <Route path="/mint" element={<MintUsdc />} />
+              <Route path="/mint-usdm" element={<MintUsdm />} />
               <Route path="/how" element={<HowTo />} />
               {/* Legacy routes kept for existing share URLs and bookmarks */}
               <Route path="/alice" element={<LegacyRedirect />} />

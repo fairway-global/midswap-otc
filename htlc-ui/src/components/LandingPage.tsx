@@ -26,6 +26,15 @@ export const LandingPage: React.FC = () => {
         flexDirection: 'column',
         overflow: 'hidden',
         bgcolor: theme.custom.surface0,
+        // Homepage uses JetBrains Mono throughout — matches the terminal
+        // aesthetic of the product surface. The app theme otherwise puts
+        // headings (h1-h6) in Inter; force mono for every Typography and
+        // Button on this page so the headline and box titles match the
+        // eyebrows, body, button, and footer.
+        fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace",
+        '& .MuiTypography-root, & .MuiButton-root': {
+          fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace",
+        },
       }}
     >
       {/* === Background layers === */}
@@ -226,10 +235,9 @@ export const LandingPage: React.FC = () => {
               fontSize: { xs: '0.84rem', md: '0.95rem' },
               maxWidth: 540,
               lineHeight: 1.7,
-              fontFamily: "'Inter', sans-serif",
             }}
           >
-            Atomic swaps between Cardano ADA and Midnight USDC using hash-time-locked escrow.
+            Atomic swaps between Cardano USDM and Midnight USDC using hash-time-locked escrow.
             No custodian. No bridge. No trust required.
           </Typography>
 
@@ -256,9 +264,9 @@ export const LandingPage: React.FC = () => {
           sx={{
             mt: 8,
             display: 'grid',
-            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr 1fr' },
+            gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' },
             gap: 2,
-            maxWidth: 900,
+            maxWidth: 1160,
             width: '100%',
           }}
         >
@@ -277,6 +285,11 @@ export const LandingPage: React.FC = () => {
               eyebrow: 'Custody',
               title: 'Self-sovereign',
               text: 'Your keys sign every transaction. Nothing custodial, ever.',
+            },
+            {
+              eyebrow: 'Compliance',
+              title: 'Verified counterparties',
+              text: 'Permissioned environment for institutional OTC trades, with ZK-based on-chain KYB.',
             },
           ].map((f, i) => (
             <Box
@@ -307,7 +320,6 @@ export const LandingPage: React.FC = () => {
                   fontSize: '0.84rem',
                   color: theme.custom.textPrimary,
                   mb: 0.5,
-                  fontFamily: "'Inter', sans-serif",
                 }}
               >
                 {f.title}

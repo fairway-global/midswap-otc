@@ -1,11 +1,12 @@
 /**
- * Static token metadata for the swap card. Two tokens only — ADA on Cardano,
- * native USDC on Midnight — and they form a fixed pair; no mainnet-style
- * selector picker is needed.
+ * Static token metadata for the swap card. Two tokens only — USDM on Cardano
+ * (native asset minted by the permissionless `usdm.ak` policy) and native USDC
+ * on Midnight. Both are integer-unit stablecoins; they form a fixed pair, so
+ * no mainnet-style token picker is needed.
  */
 
 export interface TokenMeta {
-  readonly id: 'ADA' | 'USDC';
+  readonly id: 'USDM' | 'USDC';
   readonly symbol: string;
   readonly name: string;
   readonly chain: 'Cardano' | 'Midnight';
@@ -16,13 +17,13 @@ export interface TokenMeta {
   readonly monogramTo: string;
 }
 
-export const ADA: TokenMeta = {
-  id: 'ADA',
-  symbol: 'ADA',
-  name: 'Cardano ADA',
+export const USDM: TokenMeta = {
+  id: 'USDM',
+  symbol: 'USDM',
+  name: 'Cardano USDM',
   chain: 'Cardano',
   chainAccent: '#2E7BFF',
-  decimals: 6,
+  decimals: 0,
   monogramFrom: '#4B8CFF',
   monogramTo: '#1A4FD1',
 };
@@ -41,25 +42,25 @@ export const USDC: TokenMeta = {
 /**
  * `Role` is who you are in the swap — `maker` initiates, `taker` responds.
  * `FlowDirection` is which token the maker sends:
- *   - `ada-usdc`: maker locks ADA on Cardano, taker deposits USDC on Midnight
- *   - `usdc-ada`: maker deposits USDC on Midnight, taker locks ADA on Cardano
+ *   - `usdm-usdc`: maker locks USDM on Cardano, taker deposits USDC on Midnight
+ *   - `usdc-usdm`: maker deposits USDC on Midnight, taker locks USDM on Cardano
  *
  * The two flows mirror each other — same protocol, different chain ordering.
  */
 export type Role = 'maker' | 'taker';
-export type FlowDirection = 'ada-usdc' | 'usdc-ada';
+export type FlowDirection = 'usdm-usdc' | 'usdc-usdm';
 
 export const FLOW_PAIR: Record<FlowDirection, Record<Role, { pay: TokenMeta; receive: TokenMeta }>> = {
-  'ada-usdc': {
-    maker: { pay: ADA, receive: USDC },
-    taker: { pay: USDC, receive: ADA },
+  'usdm-usdc': {
+    maker: { pay: USDM, receive: USDC },
+    taker: { pay: USDC, receive: USDM },
   },
-  'usdc-ada': {
-    maker: { pay: USDC, receive: ADA },
-    taker: { pay: ADA, receive: USDC },
+  'usdc-usdm': {
+    maker: { pay: USDC, receive: USDM },
+    taker: { pay: USDM, receive: USDC },
   },
 };
 
 /** Legacy alias — old code referred to roles as "direction". */
 export type Direction = Role;
-export const DIRECTION = FLOW_PAIR['ada-usdc'];
+export const DIRECTION = FLOW_PAIR['usdm-usdc'];

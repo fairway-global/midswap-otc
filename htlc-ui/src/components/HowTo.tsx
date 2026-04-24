@@ -8,7 +8,7 @@ import { Alert, Box, Chip, Divider, Link, List, ListItem, Stack, Typography } fr
 import { alpha, useTheme } from '@mui/material/styles';
 import { Link as RouterLink } from 'react-router-dom';
 import { TokenBadge } from './swap/TokenBadge';
-import { ADA, USDC } from './swap/tokens';
+import { USDM, USDC } from './swap/tokens';
 
 const Step: React.FC<{ n: number; title: string; children: React.ReactNode }> = ({ n, title, children }) => {
   const theme = useTheme();
@@ -75,7 +75,7 @@ export const HowTo: React.FC = () => {
         />
         <Typography variant="h3">How Midswap works</Typography>
         <Typography sx={{ color: theme.custom.textSecondary, maxWidth: 640 }}>
-          Trade ADA on Cardano ↔ native USDC on Midnight without trusting a counterparty or a custodian. Hash-time-lock
+          Trade USDM on Cardano ↔ native USDC on Midnight without trusting a counterparty or a custodian. Hash-time-lock
           escrow on both chains guarantees either both sides settle or both sides reclaim.
         </Typography>
       </Stack>
@@ -105,11 +105,15 @@ export const HowTo: React.FC = () => {
               <Link href="https://eternl.io" target="_blank" rel="noopener">
                 Install Eternl
               </Link>{' '}
-              configured for the <em>Preprod</em> network, plus ADA from the{' '}
+              configured for the <em>Preprod</em> network, plus some ADA (for tx fees & min-UTxO) from the{' '}
               <Link href="https://docs.cardano.org/cardano-testnets/tools/faucet" target="_blank" rel="noopener">
                 Cardano preprod faucet
               </Link>
-              .
+              . For USDM on Cardano use the{' '}
+              <RouterLink to="/mint-usdm" style={{ color: theme.custom.cardanoBlue }}>
+                Mint USDM
+              </RouterLink>{' '}
+              page.
             </Typography>
           </ListItem>
           <ListItem sx={{ px: 0 }}>
@@ -124,14 +128,14 @@ export const HowTo: React.FC = () => {
         </List>
       </SectionCard>
 
-      <SectionCard title="Making an offer (you have ADA, want USDC)">
+      <SectionCard title="Making an offer (you have USDM, want USDC)">
         <Stack spacing={2.5}>
           <Step n={1} title="Set the amounts and the counterparty">
-            Enter how much ADA you&apos;re willing to lock and how much USDC you want in return. Paste your
+            Enter how much USDM you&apos;re willing to lock and how much USDC you want in return. Paste your
             counterparty&apos;s Cardano address or 56-hex payment key hash — this binds the lock to their wallet
             on-chain.
           </Step>
-          <Step n={2} title="Lock ADA on Cardano">
+          <Step n={2} title="Lock USDM on Cardano">
             One Eternl signature posts an HTLC UTxO. Only the counterparty can claim, and only with the secret preimage
             you hold.
           </Step>
@@ -148,7 +152,7 @@ export const HowTo: React.FC = () => {
         </Stack>
       </SectionCard>
 
-      <SectionCard title="Taking an offer (you have USDC, want ADA)">
+      <SectionCard title="Taking an offer (you have USDC, want USDM)">
         <Stack spacing={2.5}>
           <Step n={1} title="Open the offer URL (or use Browse)">
             Paste the maker&apos;s share URL or pick an offer from{' '}
@@ -169,7 +173,7 @@ export const HowTo: React.FC = () => {
             Once the maker claims their USDC, the preimage is published on Midnight. Midswap races the indexer and the
             orchestrator to surface it as soon as possible.
           </Step>
-          <Step n={5} title="Claim ADA on Cardano">
+          <Step n={5} title="Claim USDM on Cardano">
             One signature spends the maker&apos;s HTLC UTxO with the preimage. Swap complete.
           </Step>
         </Stack>
@@ -191,12 +195,12 @@ export const HowTo: React.FC = () => {
       <SectionCard title="Where does the trust come from?">
         <Typography variant="body2" sx={{ color: theme.custom.textSecondary }}>
           Nowhere. SHA-256 is the atomic link: revealing the preimage to claim USDC on Midnight publishes it on-chain;
-          claiming ADA on Cardano requires the same preimage. Deadlines are staggered — the taker side always expires
+          claiming USDM on Cardano requires the same preimage. Deadlines are staggered — the taker side always expires
           first — so whoever doesn&apos;t act in time can reclaim without anyone losing funds.
         </Typography>
         <Divider sx={{ my: 2 }} />
         <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-          <TokenBadge token={ADA} size={28} />
+          <TokenBadge token={USDM} size={28} />
           <Typography variant="body2">Aiken validator on Cardano</Typography>
           <Box sx={{ mx: 1 }}>·</Box>
           <TokenBadge token={USDC} size={28} />

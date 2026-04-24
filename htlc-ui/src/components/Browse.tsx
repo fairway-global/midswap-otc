@@ -32,7 +32,7 @@ import { orchestratorClient, type Swap } from '../api/orchestrator-client';
 import { useSwapContext } from '../hooks';
 import { limits } from '../config/limits';
 import { TokenBadge } from './swap/TokenBadge';
-import { ADA, USDC } from './swap/tokens';
+import { USDM, USDC } from './swap/tokens';
 
 const formatRemaining = (deadlineMs: number): string => {
   const remSecs = Math.floor((deadlineMs - Date.now()) / 1000);
@@ -87,7 +87,7 @@ export const Browse: React.FC = () => {
         // Direction-aware "targets your wallet" filter:
         //   ada-usdc: Cardano lock is bound to the taker's PKH (bobPkh).
         //   usdc-ada: Midnight deposit is bound to the taker's cpk (bobCpk).
-        if (s.direction === 'ada-usdc') return !!myPkh && s.bobPkh?.toLowerCase() === myPkh;
+        if (s.direction === 'usdm-usdc') return !!myPkh && s.bobPkh?.toLowerCase() === myPkh;
         return !!myCpk && s.bobCpk?.toLowerCase() === myCpk;
       });
     }
@@ -98,9 +98,9 @@ export const Browse: React.FC = () => {
     (swap: Swap) => {
       const params = new URLSearchParams();
       params.set('hash', swap.hash);
-      params.set('adaAmount', swap.adaAmount);
+      params.set('usdmAmount', swap.usdmAmount);
       params.set('usdcAmount', swap.usdcAmount);
-      if (swap.direction === 'ada-usdc') {
+      if (swap.direction === 'usdm-usdc') {
         // Forward offer — existing URL shape.
         params.set('role', 'bob');
         params.set('aliceCpk', swap.aliceCpk);
@@ -109,8 +109,8 @@ export const Browse: React.FC = () => {
           params.set('cardanoDeadlineMs', swap.cardanoDeadlineMs.toString());
         }
       } else {
-        // Reverse offer — maker deposited USDC first; taker must lock ADA.
-        params.set('direction', 'usdc-ada');
+        // Reverse offer — maker deposited USDC first; taker must lock USDM.
+        params.set('direction', 'usdc-usdm');
         if (swap.bobPkh) params.set('makerPkh', swap.bobPkh); // reverse: bobPkh = maker's own PKH
         if (swap.midnightDeadlineMs !== null) {
           params.set('midnightDeadlineMs', swap.midnightDeadlineMs.toString());
@@ -273,7 +273,7 @@ const OfferCard: React.FC<{
   // The relevant deadline + wallet binding depend on direction.
   //   ada-usdc: Cardano lock is bound to bobPkh; deadline is cardanoDeadlineMs.
   //   usdc-ada: Midnight deposit is bound to bobCpk; deadline is midnightDeadlineMs.
-  const isForward = swap.direction === 'ada-usdc';
+  const isForward = swap.direction === 'usdm-usdc';
   const deadlineMs = isForward ? swap.cardanoDeadlineMs : swap.midnightDeadlineMs;
   const remaining = deadlineMs !== null ? deadlineMs - Date.now() : -1;
   const expired = remaining <= 0;
@@ -287,9 +287,9 @@ const OfferCard: React.FC<{
   const canTake = walletMatches && !expired && !unsafe;
 
   const titleLabel = isForward
-    ? `${swap.adaAmount} ADA → ${swap.usdcAmount} USDC`
-    : `${swap.usdcAmount} USDC → ${swap.adaAmount} ADA`;
-  const directionLabel = isForward ? 'ADA→USDC' : 'USDC→ADA';
+    ? `${swap.usdmAmount} USDM → ${swap.usdcAmount} USDC`
+    : `${swap.usdcAmount} USDC → ${swap.usdmAmount} USDM`;
+  const directionLabel = isForward ? 'USDM→USDC' : 'USDC→USDM';
 
   return (
     <Box
@@ -304,9 +304,9 @@ const OfferCard: React.FC<{
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
         <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}>
           <Stack direction="row" spacing={-0.75}>
-            <TokenBadge token={isForward ? ADA : USDC} size={30} />
+            <TokenBadge token={isForward ? USDM : USDC} size={30} />
             <Box sx={{ transform: 'translateX(-8px)' }}>
-              <TokenBadge token={isForward ? USDC : ADA} size={30} />
+              <TokenBadge token={isForward ? USDC : USDM} size={30} />
             </Box>
           </Stack>
           <Stack>

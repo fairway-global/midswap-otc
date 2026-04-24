@@ -14,7 +14,7 @@ const STATUS_VALUES: readonly SwapStatus[] = [
   'bob_reclaimed',
   'expired',
 ];
-const DIRECTION_VALUES: readonly FlowDirection[] = ['ada-usdc', 'usdc-ada'];
+const DIRECTION_VALUES: readonly FlowDirection[] = ['usdm-usdc', 'usdc-usdm'];
 
 const isHash = (s: unknown): s is string => typeof s === 'string' && HASH_RE.test(s);
 const isHex = (s: unknown): s is string => typeof s === 'string' && HEX_RE.test(s);
@@ -28,10 +28,10 @@ const validateCreateBody = (body: unknown): CreateSwapBody | string => {
   if (!isHash(b.hash)) return 'hash must be 64 lowercase hex chars';
   if (!isHex(b.aliceCpk)) return 'aliceCpk must be hex';
   if (!isNonEmptyString(b.aliceUnshielded)) return 'aliceUnshielded must be non-empty string';
-  if (!isNonEmptyString(b.adaAmount)) return 'adaAmount must be decimal string';
+  if (!isNonEmptyString(b.usdmAmount)) return 'usdmAmount must be decimal string';
   if (!isNonEmptyString(b.usdcAmount)) return 'usdcAmount must be decimal string';
 
-  const direction: FlowDirection = (b.direction as FlowDirection | undefined) ?? 'ada-usdc';
+  const direction: FlowDirection = (b.direction as FlowDirection | undefined) ?? 'usdm-usdc';
   if (!DIRECTION_VALUES.includes(direction)) {
     return `direction must be one of: ${DIRECTION_VALUES.join(', ')}`;
   }
@@ -41,11 +41,11 @@ const validateCreateBody = (body: unknown): CreateSwapBody | string => {
     direction,
     aliceCpk: b.aliceCpk.toLowerCase(),
     aliceUnshielded: b.aliceUnshielded,
-    adaAmount: b.adaAmount,
+    usdmAmount: b.usdmAmount,
     usdcAmount: b.usdcAmount,
   };
 
-  if (direction === 'ada-usdc') {
+  if (direction === 'usdm-usdc') {
     // Maker has done the Cardano lock at creation time.
     if (!isPosInt(b.cardanoDeadlineMs)) return 'cardanoDeadlineMs required for ada-usdc (integer ms)';
     if (!isNonEmptyString(b.cardanoLockTx)) return 'cardanoLockTx required for ada-usdc';

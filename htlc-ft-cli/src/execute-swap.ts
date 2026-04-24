@@ -4,10 +4,10 @@
  * Flow:
  *   0. Bob deploys USDC (native unshielded token) + HTLC (pure escrow).
  *   1. Bob mints USDC to himself.
- *   2. Alice generates preimage and locks ADA on Cardano HTLC.
+ *   2. Alice generates preimage and locks USDM on Cardano HTLC.
  *   3. Bob sees the lock, deposits native USDC on Midnight HTLC (same hash).
  *   4. Alice claims USDC on Midnight via withdrawWithPreimage — reveals preimage.
- *   5. Bob reads the preimage from Midnight state and claims ADA on Cardano.
+ *   5. Bob reads the preimage from Midnight state and claims USDM on Cardano.
  *
  * Usage:
  *   npx tsx src/execute-swap.ts
@@ -62,8 +62,7 @@ globalThis.WebSocket = WebSocket;
 // Config
 // ─────────────────────────────────────────────────────────────────────
 
-const SWAP_AMOUNT_ADA = 10n;
-const SWAP_AMOUNT_LOVELACE = SWAP_AMOUNT_ADA * 1_000_000n;
+const SWAP_AMOUNT_USDM = 10n;
 const SWAP_AMOUNT_USDC = 10n;
 const MINT_AMOUNT = 100n;
 const CARDANO_DEADLINE_MIN = 120;
@@ -228,7 +227,7 @@ async function main() {
 
   // Cardano wallets
   console.log('Initializing Cardano wallets...');
-  const { CardanoHTLC: CardanoHTLCClass } = await import('./cardano-htlc');
+  const { CardanoHTLC: CardanoHTLCClass, loadUsdmPolicy } = await import('./cardano-htlc');
   const cardanoConfig = {
     blockfrostUrl: 'https://cardano-preprod.blockfrost.io/api/v0',
     blockfrostApiKey,
@@ -245,6 +244,9 @@ async function main() {
   bobCardano.selectWalletFromSeed(addresses.bob.cardano.mnemonic);
   const bobAdaBal = await bobCardano.getBalance();
   console.log(`Bob Cardano balance: ${Number(bobAdaBal) / 1_000_000} ADA`);
+
+  const usdmPolicy = loadUsdmPolicy(cardanoConfig.blueprintPath);
+  console.log(`USDM policyId: ${usdmPolicy.policyId}`);
 
   // ══════════════════════════════════════════════════════════════════
   // STEP 1: Bob deploys USDC + HTLC, mints USDC to himself
@@ -290,10 +292,10 @@ async function main() {
   console.log(`HTLC deployed at: ${htlcAddress}`);
 
   // ══════════════════════════════════════════════════════════════════
-  // STEP 2: Alice generates preimage & locks ADA on Cardano
+  // STEP 2: Alice generates preimage & locks USDM on Cardano
   // ══════════════════════════════════════════════════════════════════
 
-  banner('STEP 2: Alice locks ADA on Cardano');
+  banner('STEP 2: Alice locks USDM on Cardano');
 
   const preimage = crypto.randomBytes(32);
   const hashLock = sha256(preimage);
@@ -305,10 +307,11 @@ async function main() {
 
   const cardanoDeadlineMs = BigInt(Date.now() + CARDANO_DEADLINE_MIN * 60 * 1000);
   console.log(`Deadline: ${new Date(Number(cardanoDeadlineMs)).toISOString()} (${CARDANO_DEADLINE_MIN} min)`);
-  console.log(`Locking ${SWAP_AMOUNT_ADA} ADA for Bob (PKH: ${addresses.bob.cardano.paymentKeyHash})...`);
+  console.log(`Locking ${SWAP_AMOUNT_USDM} USDM for Bob (PKH: ${addresses.bob.cardano.paymentKeyHash})...`);
 
   const lockTxHash = await aliceCardano.lock(
-    SWAP_AMOUNT_LOVELACE,
+    SWAP_AMOUNT_USDM,
+    usdmPolicy.unit,
     hashHex,
     addresses.bob.cardano.paymentKeyHash,
     cardanoDeadlineMs,
@@ -387,10 +390,10 @@ async function main() {
   console.log('Alice claimed USDC on Midnight!');
 
   // ══════════════════════════════════════════════════════════════════
-  // STEP 5: Bob reads preimage from Midnight, claims ADA on Cardano
+  // STEP 5: Bob reads preimage from Midnight, claims USDM on Cardano
   // ══════════════════════════════════════════════════════════════════
 
-  banner('STEP 5: Bob claims ADA on Cardano');
+  banner('STEP 5: Bob claims USDM on Cardano');
 
   // Read the preimage from Midnight contract state (revealedPreimages map).
   const state2 = await bobHtlcProviders.publicDataProvider.queryContractState(htlcAddress);
@@ -422,8 +425,8 @@ async function main() {
   const aliceAdaFinal = await aliceCardano.getBalance();
   const bobAdaFinal = await bobCardano.getBalance();
   console.log('── Cardano ──');
-  console.log(`  Alice: ${Number(aliceAdaBal) / 1e6} ADA → ${Number(aliceAdaFinal) / 1e6} ADA  (sent ${Number(SWAP_AMOUNT_ADA)} ADA)`);
-  console.log(`  Bob:   ${Number(bobAdaBal) / 1e6} ADA → ${Number(bobAdaFinal) / 1e6} ADA  (received ~${Number(SWAP_AMOUNT_ADA)} ADA)`);
+  console.log(`  Alice: ${Number(aliceAdaBal) / 1e6} ADA → ${Number(aliceAdaFinal) / 1e6} ADA  (fees + sent ${SWAP_AMOUNT_USDM} USDM)`);
+  console.log(`  Bob:   ${Number(bobAdaBal) / 1e6} ADA → ${Number(bobAdaFinal) / 1e6} ADA  (received ${SWAP_AMOUNT_USDM} USDM)`);
 
   console.log('── Midnight ──');
   const state3 = await aliceHtlcProviders.publicDataProvider.queryContractState(htlcAddress);
@@ -437,10 +440,10 @@ async function main() {
   }
 
   banner('CROSS-CHAIN ATOMIC SWAP COMPLETE');
-  console.log(`  Alice gave:     ${SWAP_AMOUNT_ADA} ADA on Cardano`);
+  console.log(`  Alice gave:     ${SWAP_AMOUNT_USDM} USDM on Cardano`);
   console.log(`  Alice received: ${SWAP_AMOUNT_USDC} USDC on Midnight (native unshielded)`);
   console.log(`  Bob gave:       ${SWAP_AMOUNT_USDC} USDC on Midnight`);
-  console.log(`  Bob received:   ${SWAP_AMOUNT_ADA} ADA on Cardano`);
+  console.log(`  Bob received:   ${SWAP_AMOUNT_USDM} USDM on Cardano`);
   console.log();
 
   await aliceWallet.stop();

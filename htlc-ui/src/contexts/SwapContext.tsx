@@ -14,6 +14,7 @@ import {
   type CIP30Api,
   type CardanoHTLCBrowserConfig,
 } from '../api/cardano-htlc-browser';
+import { loadUsdmPolicy, type UsdmPolicy } from '../api/cardano-usdm';
 import swapState from '../../swap-state.json';
 
 export interface SwapState {
@@ -36,6 +37,7 @@ export interface SwapSession {
 
 export interface CardanoSession {
   readonly cardanoHtlc: CardanoHTLCBrowser;
+  readonly usdmPolicy: UsdmPolicy;
   readonly paymentKeyHash: string;
   readonly address: string;
   readonly api: CIP30Api;
@@ -126,12 +128,15 @@ export const SwapProvider: React.FC<Props> = ({ logger, children }) => {
           }
           logger.info({ wallet: wallet.name }, 'Enabling Cardano wallet');
           const api = await wallet.enable();
-          const cardanoHtlc = await CardanoHTLCBrowser.init(config, logger);
+          const [cardanoHtlc, usdmPolicy] = await Promise.all([
+            CardanoHTLCBrowser.init(config, logger),
+            loadUsdmPolicy(config.blueprintUrl ?? '/plutus.json'),
+          ]);
           cardanoHtlc.selectWalletFromCIP30(api);
           const paymentKeyHash = await cardanoHtlc.getPaymentKeyHash();
           const address = await cardanoHtlc.getWalletAddress();
-          logger.info({ paymentKeyHash, address }, 'Cardano wallet ready');
-          const next: CardanoSession = { cardanoHtlc, paymentKeyHash, address, api };
+          logger.info({ paymentKeyHash, address, usdmPolicyId: usdmPolicy.policyId }, 'Cardano wallet ready');
+          const next: CardanoSession = { cardanoHtlc, usdmPolicy, paymentKeyHash, address, api };
           setCardano(next);
           return next;
         } catch (e) {

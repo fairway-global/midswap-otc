@@ -1,12 +1,12 @@
 /**
- * Alice's Cardano ADA reclaim — recover ADA locked on the Cardano HTLC after
+ * Alice's Cardano USDM reclaim — recover USDM locked on the Cardano HTLC after
  * Alice's Cardano deadline passes without Bob having claimed.
  *
  * Usage:
- *   npx tsx src/reclaim-ada.ts                 # reads hash from pending-swap.json
- *   npx tsx src/reclaim-ada.ts --hash <hex>    # explicit hash
- *   npx tsx src/reclaim-ada.ts --pending <path-to-pending-swap.json>
- *   SWAP_HASH=<hex> npx tsx src/reclaim-ada.ts
+ *   npx tsx src/reclaim-usdm.ts                 # reads hash from pending-swap.json
+ *   npx tsx src/reclaim-usdm.ts --hash <hex>    # explicit hash
+ *   npx tsx src/reclaim-usdm.ts --pending <path-to-pending-swap.json>
+ *   SWAP_HASH=<hex> npx tsx src/reclaim-usdm.ts
  */
 
 import * as fs from 'node:fs';
@@ -95,11 +95,11 @@ async function main() {
   }
 
   console.log('╔══════════════════════════════════════════════════════════╗');
-  console.log('║       ALICE — Cardano ADA Reclaim (after deadline)      ║');
+  console.log('║       ALICE — Cardano USDM Reclaim (after deadline)      ║');
   console.log('╚══════════════════════════════════════════════════════════╝\n');
   console.log(`Hash: ${hashHex}\n`);
 
-  const logDir = path.resolve(scriptDir, '..', 'logs', 'reclaim-ada', `${new Date().toISOString()}.log`);
+  const logDir = path.resolve(scriptDir, '..', 'logs', 'reclaim-usdm', `${new Date().toISOString()}.log`);
   const logger = await createLogger(logDir);
 
   console.log('Building Cardano wallet...');
@@ -114,7 +114,7 @@ async function main() {
   );
   htlc.selectWalletFromSeed(aliceMnemonic);
   const balanceBefore = await htlc.getBalance();
-  console.log(`Balance before: ${Number(balanceBefore) / 1e6} ADA\n`);
+  console.log(`ADA balance before: ${Number(balanceBefore) / 1e6} ADA (for fees & min-UTxO)\n`);
 
   console.log('── Locating HTLC UTxO ──');
   const utxo = await htlc.findHTLCUtxo(hashHex);
@@ -126,7 +126,11 @@ async function main() {
     process.exit(1);
   }
   console.log(`  Found UTxO: ${utxo.txHash}#${utxo.outputIndex}`);
-  console.log(`  Amount:     ${Number(utxo.assets.lovelace) / 1e6} ADA`);
+  console.log(
+    `  Assets:     ${JSON.stringify(
+      Object.fromEntries(Object.entries(utxo.assets).map(([k, v]) => [k, v.toString()])),
+    )}`,
+  );
 
   console.log('\n── Submitting reclaim ──');
   const reclaimTxHash = await htlc.reclaim(hashHex);
@@ -136,12 +140,12 @@ async function main() {
   await waitForReclaim(htlc, hashHex);
 
   const balanceAfter = await htlc.getBalance();
-  console.log(`Balance after:  ${Number(balanceAfter) / 1e6} ADA`);
+  console.log(`ADA balance after:  ${Number(balanceAfter) / 1e6} ADA`);
 
   console.log('\n╔══════════════════════════════════════════════════════════╗');
-  console.log('║               ADA RECLAIM COMPLETE                      ║');
+  console.log('║               USDM RECLAIM COMPLETE                     ║');
   console.log('╠══════════════════════════════════════════════════════════╣');
-  console.log(`║  Reclaimed: ${Number(utxo.assets.lovelace) / 1e6} ADA`);
+  console.log(`║  Assets reclaimed back to wallet (USDM + min-UTxO ADA)`);
   console.log(`║  Hash:      ${hashHex.slice(0, 32)}...`);
   console.log(`║  Tx:        ${reclaimTxHash}`);
   console.log('╚══════════════════════════════════════════════════════════╝');
@@ -150,6 +154,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('ADA reclaim failed:', e);
+  console.error('USDM reclaim failed:', e);
   process.exit(1);
 });

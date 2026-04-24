@@ -6,7 +6,7 @@
 > on preprod. Don't rewrite them. Read §7 (architecture) and §13 (what's left), then polish.
 >
 > Midswap is Uniswap-inspired: unified maker/taker model (no Alice/Bob language),
-> Cardano-blue on Midnight-dark, supports ADA⇄USDC in both directions.
+> Cardano-blue on Midnight-dark, supports USDM⇄USDC in both directions (USDM is a permissionless Cardano stablecoin minted by `usdm.ak`; both sides of the swap are 1:1-peggable dollar stablecoins, so no price feed is needed).
 
 ---
 
@@ -15,29 +15,34 @@
 Trustless atomic swap between **Midnight** (privacy L1) and **Cardano Preprod**.
 Two flow directions, both verified end-to-end:
 
-- **`ada-usdc` (forward)** — maker locks ADA on Cardano first → taker deposits USDC on
-  Midnight → maker claims USDC (preimage reveals on Midnight) → taker claims ADA.
-- **`usdc-ada` (reverse)** — maker deposits USDC on Midnight first → taker locks ADA
-  on Cardano → maker claims ADA (preimage reveals via Cardano tx redeemer) → taker
+- **`usdm-usdc` (forward)** — maker locks USDM on Cardano first → taker deposits USDC on
+  Midnight → maker claims USDC (preimage reveals on Midnight) → taker claims USDM.
+- **`usdc-usdm` (reverse)** — maker deposits USDC on Midnight first → taker locks USDM
+  on Cardano → maker claims USDM (preimage reveals via Cardano tx redeemer) → taker
   reads preimage from Blockfrost/orchestrator and claims USDC.
 
 Both flows are mirror images using the same contracts. Only the client-side
 ordering and preimage-relay path differ.
 
-**Three artefacts:**
+**Four artefacts:**
 - `usdc.compact` — USDC minter over Midnight native unshielded tokens
   (`mintUnshieldedToken` / `receiveUnshielded` / `sendUnshielded`). Coins live
   as Zswap UTXOs in user wallets; no internal balance ledger.
 - `htlc.compact` — generic color-parametric hash-time-locked escrow.
 - `cardano/validators/htlc.ak` — Aiken → PlutusV3 HTLC, driven off-chain via Lucid Evolution.
+- `cardano/validators/usdm.ak` — Aiken → PlutusV3 USDM minting policy, always-true
+  (permissionless, mirroring USDC's `mint()`). PolicyId
+  `def68337867cb4f1f95b6b811fedbfcdd7780d10a95cc072077088ea`, asset name `USDM`
+  (hex `5553444d`). `/mint-usdm` in the UI + `mintUsdm()` in
+  `htlc-ui/src/api/cardano-usdm.ts` and `htlc-ft-cli/src/cardano-htlc.ts`.
 
 ## 2. Current status
 
 **Verified on preprod:**
-- Forward two-browser swap: maker locks ADA in Eternl → URL → taker deposits USDC in
+- Forward two-browser swap: maker locks USDM in Eternl → URL → taker deposits USDC in
   Lace → maker claims → taker claims. Funds move on both chains.
 - Reverse two-browser swap: maker deposits USDC first bound to taker's Midnight keys
-  (paste bundle) → URL → taker locks ADA bound to maker's PKH → maker claims ADA
+  (paste bundle) → URL → taker locks USDM bound to maker's PKH → maker claims USDM
   (preimage in redeemer) → taker reads preimage via Blockfrost + orchestrator fast-path
   → taker claims USDC.
 - CLI regression: `npx tsx htlc-ft-cli/src/execute-swap.ts` (forward only; CLI not extended to reverse).
@@ -60,11 +65,13 @@ example-bboard/
 │   └── managed/{htlc,usdc}/     ← compiled: keys/, zkir/, contract/index.d.ts
 ├── cardano/
 │   ├── validators/htlc.ak
+│   ├── validators/usdm.ak        ← permissionless USDM minting policy
 │   └── plutus.json              ← compiled blueprint (copied into htlc-ui/public)
 ├── htlc-ft-cli/src/             ← reference CLI (behavioural spec, forward-only)
 │   ├── execute-swap.ts          ← single-process regression
-│   ├── alice-swap.ts / bob-swap.ts / reclaim-{ada,usdc}.ts
-│   ├── setup-contract.ts / mint-usdc.ts
+│   ├── alice-swap.ts / bob-swap.ts / reclaim-{usdm,usdc}.ts
+│   ├── setup-contract.ts        ← deploys USDC on Midnight + seed-mints USDM on Cardano
+│   ├── mint-usdc.ts
 │   └── {midnight,cardano}-watcher.ts / cardano-htlc.ts / config.ts
 ├── htlc-ui/                     ← THE frontend = Midswap
 │   ├── public/{keys,zkir}/, plutus.json   (populated by predev)
@@ -76,6 +83,7 @@ example-bboard/
 │   │   │   ├── common-types.ts / key-encoding.ts
 │   │   │   ├── htlc-api.ts / usdc-api.ts
 │   │   │   ├── cardano-htlc-browser.ts    (+ findClaimPreimage)
+│   │   │   ├── cardano-usdm.ts            (loadUsdmPolicy / mintUsdm / getUsdmBalance)
 │   │   │   ├── midnight-watcher.ts / cardano-watcher.ts
 │   │   │   └── orchestrator-client.ts     (direction-aware)
 │   │   ├── contexts/{BrowserHtlcManager,SwapContext,ToastContext}.tsx
@@ -88,7 +96,7 @@ example-bboard/
 │   │       │   ├── SettingsDialog.tsx / TokenRow.tsx / TokenBadge.tsx
 │   │       │   ├── tokens.ts / keyBundle.ts
 │   │       │   └── use{Maker,Taker,ReverseMaker,ReverseTaker}Flow.ts   ← reducers
-│   │       ├── Home / Browse / Activity / Reclaim / MintUsdc / HowTo .tsx
+│   │       ├── Home / Browse / Activity / Reclaim / MintUsdc / MintUsdm / HowTo .tsx
 │   │       ├── WalletGate / WalletMenu / ShareUrlCard / SwapStatusChip .tsx
 │   │       ├── AsyncButton / RecoveryBanner .tsx
 │   │       └── index.ts
@@ -145,6 +153,19 @@ Circuits: `mint`, `name`, `symbol`, `decimals`, `color`. First `mint()` captures
 subsequent mints produce coins of the same color. **No access control on `mint()`** —
 fine for preprod demo, production needs gating.
 
+### USDM (`cardano/validators/usdm.ak`, PlutusV3)
+
+Always-true minting policy (`mint(_,_,_) { True }`) — mirror of `usdc.compact`'s
+permissionless `mint()`. Deterministic policyId
+`def68337867cb4f1f95b6b811fedbfcdd7780d10a95cc072077088ea`; asset name `USDM`
+(ASCII hex `5553444d`). Unit = `policyId + assetName` (the Cardano asset key
+used in `utxo.assets[unit]`). 1 USDM = 1 integer unit (no decimals, mirroring
+USDC). The HTLC lock output carries `{ lovelace: ~2 ADA min-UTxO, [usdmUnit]: qty }`;
+both move to the spender on claim or reclaim. Locking tx is built via
+`htlc-ui/src/api/cardano-usdm.ts::mintUsdm()` (browser, CIP-30) and
+`htlc-ft-cli/src/cardano-htlc.ts::mintUsdm()` (CLI, seed). **No access control** —
+demo affordance exposed as `/mint-usdm` in the UI; production needs gating.
+
 ### Cardano HTLC (`cardano/validators/htlc.ak`, PlutusV3)
 
 - **Datum:** `{ preimageHash, sender(PKH), receiver(PKH), deadline(POSIX ms) }`
@@ -162,11 +183,11 @@ too eager for reverse flow's 2h deadline). Pre-flight throws if the window colla
 
 ## 5. Protocol
 
-### Forward (`ada-usdc`)
+### Forward (`usdm-usdc`)
 
 ```
 1. Maker: PREIMAGE = random32, HASH = SHA256(PREIMAGE)
-2. Maker: lock ADA on Cardano { hash, sender=maker_pkh, receiver=taker_pkh, deadline=now+~4h }
+2. Maker: lock USDM on Cardano { hash, sender=maker_pkh, receiver=taker_pkh, deadline=now+~4h } — UTxO carries USDM + ~2 ADA min-UTxO; min-ADA is refunded at claim/reclaim alongside USDM
 3. Maker: share offer URL / POST to orchestrator
 4. Taker: watch Cardano, find lock by hash+own PKH, deposit USDC on Midnight
           deposit(color=usdc, amt, hash, expiry=now+~2h,
@@ -174,10 +195,10 @@ too eager for reverse flow's 2h deadline). Pre-flight throws if the window colla
                   senderPayout=taker_unshielded)
 5. Maker: withdrawWithPreimage(PREIMAGE) on Midnight  → preimage in revealedPreimages[hash]
 6. Taker: read PREIMAGE from Midnight's revealedPreimages[hash]
-7. Taker: claim ADA on Cardano with PREIMAGE as redeemer
+7. Taker: claim USDM on Cardano with PREIMAGE as redeemer
 ```
 
-### Reverse (`usdc-ada`)
+### Reverse (`usdc-usdm`)
 
 ```
 1. Maker: PREIMAGE = random32, HASH = SHA256(PREIMAGE)
@@ -186,10 +207,10 @@ too eager for reverse flow's 2h deadline). Pre-flight throws if the window colla
           deposit(color=usdc, amt, hash, expiry=now+~4h,
                   receiverAuth=taker_cpk, receiverPayout=taker_unshielded,
                   senderPayout=maker_unshielded)
-4. Maker: share URL (direction=usdc-ada, includes maker's own PKH)
-5. Taker: watch Midnight for deposit bound to own cpk, then lock ADA on Cardano
+4. Maker: share URL (direction=usdc-usdm, includes maker's own PKH)
+5. Taker: watch Midnight for deposit bound to own cpk, then lock USDM on Cardano
           { hash, sender=taker_pkh, receiver=maker_pkh, deadline=now+~2h }
-6. Maker: claim ADA on Cardano with Withdraw{preimage} — preimage commits to tx redeemer
+6. Maker: claim USDM on Cardano with Withdraw{preimage} — preimage commits to tx redeemer
           (no Midnight side-effect)
 7. Taker: read preimage from Cardano spend redeemer (Blockfrost /txs/{hash}/redeemers +
           /scripts/datum/{hash}/cbor) OR from orchestrator's midnightPreimage (fast-path,
@@ -229,20 +250,20 @@ in both directions** — orchestrator is a fast-path view + preimage relay, neve
 ### `SwapCard.tsx` — the heart of the UI
 
 One 480px rounded card, Uniswap-style:
-- Header: "Swap" + direction subtitle ("ADA→USDC offer" / "Take ADA→USDC offer" / ...) + settings gear.
+- Header: "Swap" + direction subtitle ("USDM→USDC offer" / "Take USDM→USDC offer" / ...) + settings gear.
 - Pay row + flip button (absolute, `translate(-50%, -50%)`) + Receive row.
 - Direction-aware counterparty inputs:
-  - `maker, ada-usdc`: one field — "Counterparty Cardano address or PKH".
-  - `maker, usdc-ada`: two fields — "Midnight shielded coin key" + "Midnight unshielded address".
+  - `maker, usdm-usdc`: one field — "Counterparty Cardano address or PKH".
+  - `maker, usdc-usdm`: two fields — "Midnight shielded coin key" + "Midnight unshielded address".
     Plus a **"Paste bundle"** button; pasting a `cpk:unshielded` bundle into either
     field auto-splits.
   - `taker, *`: offer-summary card (hash + deadline), no input.
 - Primary CTA (full-width pill) — label adapts: "Connect Midnight + Cardano" / "Enter amount" /
-  "Enter counterparty..." / "Review & lock N ADA" / "Review & deposit N USDC" / "View progress".
+  "Enter counterparty..." / "Review & lock N USDM" / "Review & deposit N USDC" / "View progress".
 - Footer: "Need USDC? Mint on Midnight · How it works".
 
 **Flip button:** in maker mode toggles direction (blocks with toast if flow in flight);
-in taker mode clears URL and returns to maker (ada-usdc default).
+in taker mode clears URL and returns to maker (usdm-usdc default).
 
 ### `SwapProgressModal.tsx`
 
@@ -361,13 +382,17 @@ fallback — the orchestrator just shaves 5-10s off cross-chain notifications.
 
 ### Schema
 
-New column `direction` (`'ada-usdc' | 'usdc-ada'`, default `'ada-usdc'`, CHECK-constrained).
-`cardano_deadline_ms` / `cardano_lock_tx` are now nullable (filled later for reverse swaps).
-Migrations in `db.ts` are additive + rebuild-based; existing rows get backfilled `direction='ada-usdc'`.
+Columns `usdm_amount` / `usdc_amount`. `direction` union is `'usdm-usdc' | 'usdc-usdm'`,
+default `'usdm-usdc'`, CHECK-constrained. `cardano_deadline_ms` / `cardano_lock_tx` are
+nullable (filled later for reverse swaps). `db.ts` detects the legacy `'ada-usdc'` CHECK
+in the table DDL and rebuilds with the new CHECK, backfilling `'ada-usdc' → 'usdm-usdc'`
+and `'usdc-ada' → 'usdc-usdm'`. Both the `usdmAmount` URL param and `usdm-usdc`/`usdc-usdm`
+direction strings have read-side fallbacks for legacy `adaAmount` / `ada-usdc` / `usdc-ada`
+so preprod URLs in the wild still resolve.
 
 Field semantics are direction-dependent:
 
-| field               | `ada-usdc` (forward)           | `usdc-ada` (reverse)                 |
+| field               | `usdm-usdc` (forward)          | `usdc-usdm` (reverse)                |
 |---------------------|--------------------------------|--------------------------------------|
 | `aliceCpk/Unshielded` | maker's Midnight keys        | maker's Midnight keys                |
 | `cardanoLockTx`     | maker lock (at create)         | taker lock (PATCHed later)           |
@@ -381,16 +406,16 @@ Field semantics are direction-dependent:
 ### Watchers (direction-aware)
 
 `midnight-watcher.ts`:
-- `ada-usdc`: `open→bob_deposited` on deposit; `→alice_claimed` on preimage reveal;
+- `usdm-usdc`: `open→bob_deposited` on deposit; `→alice_claimed` on preimage reveal;
   `→bob_reclaimed` on `amount=0 && no preimage`.
-- `usdc-ada`: `→completed` on `amount=0 && preimage revealed`; `→alice_reclaimed` on
+- `usdc-usdm`: `→completed` on `amount=0 && preimage revealed`; `→alice_reclaimed` on
   `amount=0 && no preimage && past deadline`. (Midnight doesn't observe preimage-reveal
   in this direction — that's on Cardano.)
 
 `cardano-watcher.ts`:
-- `ada-usdc`: `alice_claimed→completed` on UTxO spent; `open|bob_deposited→alice_reclaimed`
+- `usdm-usdc`: `alice_claimed→completed` on UTxO spent; `open|bob_deposited→alice_reclaimed`
   on post-deadline spend.
-- `usdc-ada`: `open→bob_deposited` when new HTLC UTxO appears bound to maker's PKH (verified
+- `usdc-usdm`: `open→bob_deposited` when new HTLC UTxO appears bound to maker's PKH (verified
   against `bob_pkh`); `→alice_claimed` on spend — **extracts preimage from spend tx's
   redeemer** (Blockfrost `/txs/{hash}/redeemers` + `/scripts/datum/{hash}/cbor`) and
   PATCHes `midnight_preimage` so the reverse taker's fast-path lights up before their
@@ -500,10 +525,11 @@ https://faucet.preprod.midnight.network/, ~15min first sync; Cardano preprod fau
 # 1. Compile + build
 cd contract
 npm run compact:htlc && npm run compact:usdc && npm run build:all
+cd ../cardano && aiken build                       # regenerates plutus.json (htlc + usdm)
 
-# 2. Deploy + mint seed USDC
+# 2. Deploy + mint seed USDC on Midnight, seed-mint USDM on Cardano
 cd ../htlc-ft-cli
-MIDNIGHT_NETWORK=preprod npx tsx src/setup-contract.ts
+MIDNIGHT_NETWORK=preprod BLOCKFROST_API_KEY=$BLOCKFROST_API_KEY npx tsx src/setup-contract.ts
 cp swap-state.json ../htlc-ui/swap-state.json
 
 # 3. Orchestrator (recommended)
@@ -518,12 +544,12 @@ cd ../htlc-ui && npm install && npm run dev
 
 **Forward:** Browser A → `/`, connect, paste taker Cardano address, "Review & lock",
 sign in Eternl → copy share URL from progress modal → Browser B opens URL, connects,
-accepts, deposits → A claims USDC → B claims ADA.
+accepts, deposits → A claims USDC → B claims USDM.
 
 **Reverse:** Browser B → WalletMenu → "Copy both (bundle)" → send string to Browser A.
 Browser A → `/`, connect, flip direction, paste bundle, "Review & deposit", sign in
-Lace → share URL (`direction=usdc-ada&makerPkh=…`) → B opens, verifies, signs Cardano
-lock in Eternl → A's "Claim ADA" appears after ~20-30s Blockfrost lag → A claims →
+Lace → share URL (`direction=usdc-usdm&makerPkh=…`) → B opens, verifies, signs Cardano
+lock in Eternl → A's "Claim USDM" appears after ~20-30s Blockfrost lag → A claims →
 B's "Claim USDC" lights up via orchestrator fast-path or Blockfrost redeemer → B claims.
 
 ### CLI regression (forward only)
@@ -591,8 +617,10 @@ Turn into a small celebration: share-to-social card, explorer links, "Swap again
 - **Contract split** (htlc + usdc) — don't join.
 - **`watchForCardanoLock` signature** — `(receiverPkh, hashHex, deadline > now)` triple-filter.
 - **Share URL param names** — existing URLs in the wild depend on:
-  forward: `hash, aliceCpk, aliceUnshielded, cardanoDeadlineMs, adaAmount, usdcAmount, role=bob`;
-  reverse: `hash, direction=usdc-ada, makerPkh, midnightDeadlineMs, adaAmount, usdcAmount`.
+  forward: `hash, aliceCpk, aliceUnshielded, cardanoDeadlineMs, usdmAmount, usdcAmount, role=bob`;
+  reverse: `hash, direction=usdc-usdm, makerPkh, midnightDeadlineMs, usdmAmount, usdcAmount`.
+  Legacy `adaAmount` and `direction=ada-usdc`/`usdc-ada` values are accepted as read-side
+  aliases for in-flight preprod URLs.
   Keep even if renaming internals.
 - **Verify-on-error patterns in deposit paths** — catches Lace quirk (Landmine #5).
 - **Blockfrost index-visibility gate in reverse-maker `waiting-cardano`** — prevents

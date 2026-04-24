@@ -11,7 +11,7 @@ interface SwapRow {
   direction: FlowDirection;
   alice_cpk: string;
   alice_unshielded: string;
-  ada_amount: string;
+  usdm_amount: string;
   usdc_amount: string;
   cardano_deadline_ms: number | null;
   cardano_lock_tx: string | null;
@@ -35,7 +35,7 @@ const rowToSwap = (row: SwapRow): Swap => ({
   direction: row.direction,
   aliceCpk: row.alice_cpk,
   aliceUnshielded: row.alice_unshielded,
-  adaAmount: row.ada_amount,
+  usdmAmount: row.usdm_amount,
   usdcAmount: row.usdc_amount,
   cardanoDeadlineMs: row.cardano_deadline_ms,
   cardanoLockTx: row.cardano_lock_tx,
@@ -83,7 +83,7 @@ export const openSwapStore = (dbPath: string): SwapStore => {
     db.exec('ALTER TABLE swaps ADD COLUMN midnight_preimage TEXT');
   }
   if (!colNames.has('direction')) {
-    db.exec(`ALTER TABLE swaps ADD COLUMN direction TEXT NOT NULL DEFAULT 'ada-usdc'`);
+    db.exec(`ALTER TABLE swaps ADD COLUMN direction TEXT NOT NULL DEFAULT 'usdm-usdc'`);
   }
 
   // Step 3 — legacy NOT-NULL rebuild. Older schemas declared
@@ -101,11 +101,11 @@ export const openSwapStore = (dbPath: string): SwapStore => {
       db.exec(`
         CREATE TABLE swaps_new (
           hash TEXT PRIMARY KEY,
-          direction TEXT NOT NULL DEFAULT 'ada-usdc'
-            CHECK (direction IN ('ada-usdc', 'usdc-ada')),
+          direction TEXT NOT NULL DEFAULT 'usdm-usdc'
+            CHECK (direction IN ('usdm-usdc', 'usdc-usdm')),
           alice_cpk TEXT NOT NULL,
           alice_unshielded TEXT NOT NULL,
-          ada_amount TEXT NOT NULL,
+          usdm_amount TEXT NOT NULL,
           usdc_amount TEXT NOT NULL,
           cardano_deadline_ms INTEGER,
           cardano_lock_tx TEXT,
@@ -129,7 +129,85 @@ export const openSwapStore = (dbPath: string): SwapStore => {
       `);
       db.exec(`
         INSERT INTO swaps_new SELECT
-          hash, direction, alice_cpk, alice_unshielded, ada_amount, usdc_amount,
+          hash, direction, alice_cpk, alice_unshielded, usdm_amount, usdc_amount,
+          cardano_deadline_ms, cardano_lock_tx, bob_pkh,
+          midnight_deadline_ms, midnight_deposit_tx, bob_cpk, bob_unshielded,
+          midnight_claim_tx, cardano_claim_tx, cardano_reclaim_tx, midnight_reclaim_tx,
+          midnight_preimage, status, created_at, updated_at
+        FROM swaps
+      `);
+      db.exec('DROP TABLE swaps');
+      db.exec('ALTER TABLE swaps_new RENAME TO swaps');
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  // Step 3b — direction-CHECK rebuild. DBs created before the ADA→USDM
+  // rename carry `CHECK (direction IN ('ada-usdc','usdc-ada'))` and rows
+  // populated with those literals. SQLite can't alter CHECK in place, so we
+  // detect the old CHECK in sqlite_master and rebuild if present, backfilling
+  // direction values at the same time.
+  const tableDdl =
+    (
+      db
+        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='swaps'")
+        .get() as { sql?: string } | undefined
+    )?.sql ?? '';
+  if (tableDdl.includes("'ada-usdc'") || tableDdl.includes("'usdc-ada'")) {
+    // The legacy table's amount column is named `ada_amount`; alias it to
+    // `usdm_amount` during the rebuild. If the column was already renamed in
+    // a prior partial run, keep it as-is.
+    const hasAdaAmount = existingCols.some((c) => c.name === 'ada_amount');
+    const hasUsdmAmount = existingCols.some((c) => c.name === 'usdm_amount');
+    const amountSelect = hasUsdmAmount
+      ? 'usdm_amount'
+      : hasAdaAmount
+        ? 'ada_amount AS usdm_amount'
+        : "'0' AS usdm_amount"; // shouldn't happen, but safest fallback
+
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE swaps_new (
+          hash TEXT PRIMARY KEY,
+          direction TEXT NOT NULL DEFAULT 'usdm-usdc'
+            CHECK (direction IN ('usdm-usdc', 'usdc-usdm')),
+          alice_cpk TEXT NOT NULL,
+          alice_unshielded TEXT NOT NULL,
+          usdm_amount TEXT NOT NULL,
+          usdc_amount TEXT NOT NULL,
+          cardano_deadline_ms INTEGER,
+          cardano_lock_tx TEXT,
+          bob_pkh TEXT,
+          midnight_deadline_ms INTEGER,
+          midnight_deposit_tx TEXT,
+          bob_cpk TEXT,
+          bob_unshielded TEXT,
+          midnight_claim_tx TEXT,
+          cardano_claim_tx TEXT,
+          cardano_reclaim_tx TEXT,
+          midnight_reclaim_tx TEXT,
+          midnight_preimage TEXT,
+          status TEXT NOT NULL CHECK (status IN (
+            'open','bob_deposited','alice_claimed','completed',
+            'alice_reclaimed','bob_reclaimed','expired'
+          )),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      db.exec(`
+        INSERT INTO swaps_new SELECT
+          hash,
+          CASE direction
+            WHEN 'ada-usdc' THEN 'usdm-usdc'
+            WHEN 'usdc-ada' THEN 'usdc-usdm'
+            ELSE direction
+          END AS direction,
+          alice_cpk, alice_unshielded, ${amountSelect}, usdc_amount,
           cardano_deadline_ms, cardano_lock_tx, bob_pkh,
           midnight_deadline_ms, midnight_deposit_tx, bob_cpk, bob_unshielded,
           midnight_claim_tx, cardano_claim_tx, cardano_reclaim_tx, midnight_reclaim_tx,
@@ -156,13 +234,13 @@ export const openSwapStore = (dbPath: string): SwapStore => {
   // than the forward flow, so we build the INSERT dynamically.
   const createSwap = (body: CreateSwapBody): Swap => {
     const now = Date.now();
-    const direction: FlowDirection = body.direction ?? 'ada-usdc';
+    const direction: FlowDirection = body.direction ?? 'usdm-usdc';
     const columns: Record<string, unknown> = {
       hash: body.hash,
       direction,
       alice_cpk: body.aliceCpk,
       alice_unshielded: body.aliceUnshielded,
-      ada_amount: body.adaAmount,
+      usdm_amount: body.usdmAmount,
       usdc_amount: body.usdcAmount,
       cardano_deadline_ms: body.cardanoDeadlineMs ?? null,
       cardano_lock_tx: body.cardanoLockTx ?? null,

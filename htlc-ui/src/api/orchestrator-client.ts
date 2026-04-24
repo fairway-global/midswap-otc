@@ -19,7 +19,7 @@ export type SwapStatus =
   | 'bob_reclaimed'
   | 'expired';
 
-export type FlowDirection = 'ada-usdc' | 'usdc-ada';
+export type FlowDirection = 'usdm-usdc' | 'usdc-usdm';
 
 export interface Swap {
   hash: string;
@@ -27,7 +27,7 @@ export interface Swap {
 
   aliceCpk: string;
   aliceUnshielded: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
 
   cardanoDeadlineMs: number | null;
@@ -58,7 +58,7 @@ export interface Swap {
  *   usdc-ada: send `midnightDepositTx`, `midnightDeadlineMs`,
  *             `bobCpk`, `bobUnshielded` (taker's keys from the paste-bundle),
  *             `bobPkh` (maker's OWN Cardano PKH — the receiver the taker's
- *             future ADA lock will bind to).
+ *             future USDM lock will bind to).
  */
 export interface CreateSwapBody {
   hash: string;
@@ -66,7 +66,7 @@ export interface CreateSwapBody {
 
   aliceCpk: string;
   aliceUnshielded: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
 
   cardanoDeadlineMs?: number;

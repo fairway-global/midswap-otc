@@ -330,8 +330,13 @@ const mainLoop = async (
         // ── Cardano: Lock ──
         case '7': {
           if (!cardano) { logger.error('Cardano not configured.'); break; }
-          const adaStr = await rli.question('Amount in ADA to lock: ');
-          const lovelace = BigInt(Math.floor(parseFloat(adaStr) * 1_000_000));
+          const { loadUsdmPolicy } = await import('./cardano-htlc');
+          const path = await import('node:path');
+          const scriptDir = path.resolve(new URL(import.meta.url).pathname, '..');
+          const blueprintPath = path.resolve(scriptDir, '..', '..', 'cardano', 'plutus.json');
+          const usdmPolicy = loadUsdmPolicy(blueprintPath);
+          const usdmStr = await rli.question('Amount in USDM to lock (integer): ');
+          const usdmQty = BigInt(usdmStr);
 
           const hashHex = await rli.question('Hash lock (64 hex chars): ');
           if (hashHex.length !== 64) { logger.error('Hash lock must be 64 hex chars.'); break; }
@@ -344,7 +349,7 @@ const mainLoop = async (
           const deadlineMs = BigInt(Date.now() + mins * 60 * 1000);
           logger.info(`Deadline: ${new Date(Number(deadlineMs)).toISOString()}`);
 
-          const txHash = await cardano.lock(lovelace, hashHex, receiverPkh, deadlineMs);
+          const txHash = await cardano.lock(usdmQty, usdmPolicy.unit, hashHex, receiverPkh, deadlineMs);
           logger.info(`Cardano HTLC created! Tx: ${txHash}`);
           break;
         }

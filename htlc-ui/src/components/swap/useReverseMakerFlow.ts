@@ -1,10 +1,10 @@
 /**
- * Reverse maker flow — USDC → ADA direction.
+ * Reverse maker flow — USDC → USDM direction.
  *
- * The maker holds native Midnight USDC and wants Cardano ADA. They deposit
+ * The maker holds native Midnight USDC and wants Cardano USDM. They deposit
  * USDC on Midnight first (bound to the counterparty's Midnight credentials),
- * then wait for the counterparty to lock ADA on Cardano bound to the maker's
- * PKH, then claim that ADA on Cardano by revealing the preimage — which the
+ * then wait for the counterparty to lock USDM on Cardano bound to the maker's
+ * PKH, then claim that USDM on Cardano by revealing the preimage — which the
  * counterparty reads from the Cardano tx redeemer to claim USDC on Midnight.
  *
  * This is the mirror image of `useMakerFlow`. The preimage still moves the
@@ -20,7 +20,7 @@ import { watchForHTLCDeposit } from '../../api/midnight-watcher';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 
 export interface ReverseMakerLockParams {
-  readonly adaAmount: bigint;
+  readonly usdmAmount: bigint;
   readonly usdcAmount: bigint;
   readonly deadlineMin: number;
   /** Counterparty's Midnight shielded coin public key as 64-hex (decoded bytes). */
@@ -37,7 +37,7 @@ export type ReverseMakerStep =
       hashHex: string;
       preimageHex: string;
       midnightDeadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
     }
   | {
@@ -45,7 +45,7 @@ export type ReverseMakerStep =
       hashHex: string;
       preimageHex: string;
       midnightDeadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
     }
   | {
@@ -53,7 +53,7 @@ export type ReverseMakerStep =
       hashHex: string;
       preimageHex: string;
       midnightDeadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
       cardanoHtlc: CardanoHTLCInfo;
     }
@@ -62,14 +62,14 @@ export type ReverseMakerStep =
       hashHex: string;
       preimageHex: string;
       midnightDeadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
       cardanoHtlc: CardanoHTLCInfo;
     }
   | {
       kind: 'done';
       hashHex: string;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
       claimTxHash: string;
     }
@@ -107,7 +107,7 @@ const reducer = (state: ReverseMakerStep, action: Action): ReverseMakerStep => {
         ? {
             kind: 'done',
             hashHex: state.hashHex,
-            adaAmount: state.adaAmount,
+            usdmAmount: state.usdmAmount,
             usdcAmount: state.usdcAmount,
             claimTxHash: action.claimTxHash,
           }
@@ -127,7 +127,7 @@ interface PersistedSwap {
   hashHex: string;
   preimageHex: string;
   midnightDeadlineMs: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
 }
 
@@ -206,12 +206,13 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         hashHex: pending.hashHex,
         preimageHex: pending.preimageHex,
         midnightDeadlineMs: BigInt(pending.midnightDeadlineMs),
-        adaAmount: BigInt(pending.adaAmount),
+        // Legacy restore: pre-USDM records stored the amount as `adaAmount`.
+        usdmAmount: BigInt(pending.usdmAmount ?? (pending as unknown as { adaAmount: string }).adaAmount),
         usdcAmount: BigInt(pending.usdcAmount),
       },
     });
     setRestoreNotice(
-      `Resumed pending USDC→ADA swap ${pending.hashHex.slice(0, 12)}… — watching Cardano for the counterparty lock.`,
+      `Resumed pending USDC→USDM swap ${pending.hashHex.slice(0, 12)}… — watching Cardano for the counterparty lock.`,
     );
   }, [session]);
 
@@ -240,6 +241,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
       try {
         const htlcInfo = await watchForCardanoLock(
           cardano.cardanoHtlc,
+          cardano.usdmPolicy.unit,
           cardano.paymentKeyHash,
           10_000,
           state.hashHex,
@@ -273,7 +275,8 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         }
         finishBlockfrost({
           hashHex: state.hashHex,
-          amountLovelace: utxoVisible.assets.lovelace ?? BigInt(state.adaAmount) * 1_000_000n,
+          amountUsdm: utxoVisible.assets[cardano.usdmPolicy.unit] ?? state.usdmAmount,
+          amountLovelace: utxoVisible.assets.lovelace ?? 2_000_000n,
           deadlineMs: BigInt(dbSwap.cardanoDeadlineMs),
           senderPkh: dbSwap.bobPkh ?? '',
           receiverPkh: cardano.paymentKeyHash,
@@ -304,11 +307,11 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
     if (!session || !cardano) return undefined;
     const url = new URL(window.location.origin);
     url.pathname = '/swap';
-    url.searchParams.set('direction', 'usdc-ada');
+    url.searchParams.set('direction', 'usdc-usdm');
     url.searchParams.set('hash', state.hashHex);
     url.searchParams.set('makerPkh', cardano.paymentKeyHash);
     url.searchParams.set('midnightDeadlineMs', state.midnightDeadlineMs.toString());
-    url.searchParams.set('adaAmount', state.adaAmount.toString());
+    url.searchParams.set('usdmAmount', state.usdmAmount.toString());
     url.searchParams.set('usdcAmount', state.usdcAmount.toString());
     return url.toString();
   })();
@@ -379,7 +382,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         hashHex,
         preimageHex,
         midnightDeadlineMs: midnightDeadlineMs.toString(),
-        adaAmount: params.adaAmount.toString(),
+        usdmAmount: params.usdmAmount.toString(),
         usdcAmount: params.usdcAmount.toString(),
       });
 
@@ -394,10 +397,10 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         () =>
           orchestratorClient.createSwap({
             hash: hashHex,
-            direction: 'usdc-ada',
+            direction: 'usdc-usdm',
             aliceCpk: session.bootstrap.coinPublicKeyHex,
             aliceUnshielded: session.bootstrap.unshieldedAddressHex,
-            adaAmount: params.adaAmount.toString(),
+            usdmAmount: params.usdmAmount.toString(),
             usdcAmount: params.usdcAmount.toString(),
             midnightDeadlineMs: Number(midnightDeadlineMs),
             midnightDepositTx: depositTxHash ?? `pending:${hashHex}`,
@@ -415,7 +418,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
           hashHex,
           preimageHex,
           midnightDeadlineMs,
-          adaAmount: params.adaAmount,
+          usdmAmount: params.usdmAmount,
           usdcAmount: params.usdcAmount,
         },
       });
@@ -427,7 +430,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
     if (state.kind !== 'claim-ready' || !cardano || !session) return;
     dispatch({ t: 'to-claiming' });
     try {
-      // Claiming ADA on Cardano with the preimage reveals it via the
+      // Claiming USDM on Cardano with the preimage reveals it via the
       // transaction redeemer. PATCH the orchestrator so the taker's fast-path
       // picks up the preimage instantly instead of polling Blockfrost redeemer
       // endpoints for several seconds.

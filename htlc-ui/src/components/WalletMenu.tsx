@@ -15,6 +15,7 @@ import { alpha, useTheme } from '@mui/material/styles';
 import { useSwapContext } from '../hooks';
 import { useToast } from '../hooks/useToast';
 import { formatKeyBundle } from './swap/keyBundle';
+import { getUsdmBalance } from '../api/cardano-usdm';
 
 const formatAda = (lovelace: bigint): string => {
   const whole = lovelace / 1_000_000n;
@@ -30,19 +31,27 @@ export const WalletMenu: React.FC = () => {
   const { session, cardano, connecting, cardanoConnecting, connect, connectCardano } = useSwapContext();
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
   const [adaBalance, setAdaBalance] = useState<bigint | undefined>(undefined);
+  const [usdmBalance, setUsdmBalance] = useState<bigint | undefined>(undefined);
 
   const anyConnected = !!session || !!cardano;
 
   useEffect(() => {
     if (!cardano) {
       setAdaBalance(undefined);
+      setUsdmBalance(undefined);
       return;
     }
     let cancelled = false;
     const update = async (): Promise<void> => {
       try {
-        const b = await cardano.cardanoHtlc.getBalance();
-        if (!cancelled) setAdaBalance(b);
+        const [ada, usdm] = await Promise.all([
+          cardano.cardanoHtlc.getBalance(),
+          getUsdmBalance(cardano.cardanoHtlc.lucid, cardano.usdmPolicy.unit),
+        ]);
+        if (!cancelled) {
+          setAdaBalance(ada);
+          setUsdmBalance(usdm);
+        }
       } catch {
         /* ignore transient */
       }
@@ -112,8 +121,8 @@ export const WalletMenu: React.FC = () => {
               size="small"
               label={
                 cardano
-                  ? adaBalance !== undefined
-                    ? `${formatAda(adaBalance)} ADA`
+                  ? usdmBalance !== undefined
+                    ? `${usdmBalance.toString()} USDM`
                     : shortHex(cardano.paymentKeyHash)
                   : 'Cardano'
               }
@@ -190,7 +199,7 @@ export const WalletMenu: React.FC = () => {
                 Copy both (bundle)
               </Button>
               <Typography variant="caption" sx={{ color: theme.custom.textMuted, fontSize: '0.68rem' }}>
-                Paste this bundle into a counterparty&apos;s Midswap to bind a USDC→ADA offer to you.
+                Paste this bundle into a counterparty&apos;s Midswap to bind a USDC→USDM offer to you.
               </Typography>
             </Stack>
           )}
@@ -227,9 +236,14 @@ export const WalletMenu: React.FC = () => {
                 onCopy={() => copy(cardano.paymentKeyHash, 'Payment key hash')}
               />
               <AddressRow label="Address" value={cardano.address} onCopy={() => copy(cardano.address, 'Address')} />
-              {adaBalance !== undefined && (
+              {usdmBalance !== undefined && (
                 <Typography variant="caption" sx={{ color: theme.custom.textMuted }}>
-                  Balance: {formatAda(adaBalance)} ADA
+                  Balance: {usdmBalance.toString()} USDM
+                </Typography>
+              )}
+              {adaBalance !== undefined && (
+                <Typography variant="caption" sx={{ color: theme.custom.textMuted, fontSize: '0.68rem' }}>
+                  {formatAda(adaBalance)} ADA (for fees &amp; min-UTxO)
                 </Typography>
               )}
             </Stack>
