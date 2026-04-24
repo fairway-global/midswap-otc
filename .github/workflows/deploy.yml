@@ -1,0 +1,240 @@
+name: Build & Deploy
+
+# Trigger on every push to the main branch.
+# Pull requests don't deploy — they only run type-checks (fast feedback).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# What each environment variable means:
+#   REGISTRY       — GitHub Container Registry (free, built into GitHub)
+#   IMAGE_NAME     — <owner>/<repo-name>  (resolved at runtime)
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/midswap-orchestrator
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1: Type-check the orchestrator
+# Purpose: fast failure before we build a Docker image or deploy anything.
+# Runs on PRs too, so contributors get type errors in their PR checks.
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          # Cache npm dependencies keyed by the lockfile hash.
+          # If package-lock.json hasn't changed, npm ci takes ~5s instead of ~60s.
+          cache: "npm"
+          cache-dependency-path: htlc-orchestrator/package-lock.json
+
+      - name: Install orchestrator deps
+        run: npm ci
+        working-directory: htlc-orchestrator
+
+      - name: tsc --noEmit
+        run: npm run typecheck
+        working-directory: htlc-orchestrator
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2: Build the orchestrator Docker image and push it to GHCR
+  # Runs only on pushes to main (not PRs) so we don't push untested images.
+  # ───────────────────────────────────────────────────────────────────────────
+  build-orchestrator:
+    name: Build & Push Orchestrator
+    runs-on: ubuntu-latest
+    needs: typecheck
+    # Only run on pushes to main, not on PRs.
+    if: github.event_name == 'push'
+
+    # These permissions let GITHUB_TOKEN push to GHCR.
+    # `contents: read` is the default; `packages: write` is the addition.
+    permissions:
+      contents: read
+      packages: write
+
+    # Expose the short SHA tag so the deploy job can pass it to the VM.
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Enable Docker BuildKit's multi-platform builder (faster caching).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to GHCR using the automatic GITHUB_TOKEN.
+      # No long-lived personal access token needed here.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate Docker tags and labels from Git metadata:
+      #   :latest          — always points to the most recent main build
+      #   :sha-<short-sha> — immutable reference to this exact commit
+      # The short SHA is what gets deployed to the VM so we always know
+      # exactly which commit is running in production.
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=true
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push orchestrator image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./htlc-orchestrator
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Pull the previous :latest layer cache from the registry.
+          # On a cache hit, only changed layers are rebuilt — typically < 30s.
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-to: type=inline
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 3: Build the React UI
+  # Vite bakes VITE_* env vars into the JS bundle at build time, so we inject
+  # them from GitHub Secrets here and never store them in the repository.
+  # ───────────────────────────────────────────────────────────────────────────
+  build-ui:
+    name: Build UI
+    runs-on: ubuntu-latest
+    needs: typecheck
+    if: github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: htlc-ui/package-lock.json
+
+      - name: Install UI deps
+        run: npm ci
+        working-directory: htlc-ui
+
+      # Overwrite .env.preprod with production values from GitHub Secrets.
+      # The build script reads this file via `vite build --mode preprod`.
+      # We never commit real keys — the committed file has placeholder values.
+      - name: Inject production env vars
+        run: |
+          cat > htlc-ui/.env.preprod << 'EOF'
+          VITE_NETWORK_ID=preprod
+          VITE_LOGGING_LEVEL=warn
+          VITE_PROOF_SERVER_URI=${{ secrets.VITE_PROOF_SERVER_URI }}
+          VITE_BLOCKFROST_API_KEY=${{ secrets.VITE_BLOCKFROST_API_KEY }}
+          VITE_ORCHESTRATOR_URL=https://${{ secrets.DOMAIN_NAME }}
+          EOF
+
+      # prebuild hook runs automatically: copies ZK proof assets from
+      # contract/src/managed/ into htlc-ui/public/keys/ and public/zkir/.
+      # Those files must be committed to the repo for this to work.
+      - name: Build UI
+        run: npm run build
+        working-directory: htlc-ui
+
+      # Upload the dist/ folder as a build artifact so the deploy job can
+      # download it without needing to rebuild. Artifacts are stored for 1 day
+      # (we don't need long retention — we only need it for this workflow run).
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: htlc-ui/dist/
+          retention-days: 1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 4: Deploy to GCP VM
+  # Waits for both the orchestrator image and the UI build to finish, then:
+  #   a) SCPs the UI static files to the VM (Nginx serves them directly)
+  #   b) SSHs in and runs deploy.sh to pull the new image and restart
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-orchestrator, build-ui]
+    if: github.event_name == 'push'
+
+    # "production" is a GitHub Environment — it lets you require manual approval
+    # for deploys and restricts which secrets are available. Create it at:
+    # Settings → Environments → New environment → "production"
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download the UI build artifact from Job 3.
+      - name: Download UI dist
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui-dist/
+
+      # SCP the static files to the VM.
+      # The "deploy" user owns /var/www/midswap (set in setup-vm.sh).
+      # appleboy/scp-action wraps rsync-over-SSH cleanly.
+      - name: Upload UI to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: "ui-dist/*"
+          target: "/var/www/midswap"
+          # strip_components removes the "ui-dist/" prefix so files land
+          # directly at /var/www/midswap/ not /var/www/midswap/ui-dist/
+          strip_components: 1
+
+      # Also update docker-compose.yml on the VM from the repo copy.
+      # This keeps the compose file in sync without a manual scp step.
+      - name: Upload docker-compose.yml to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: "deploy/docker-compose.yml"
+          target: "/opt/midswap/"
+          strip_components: 2
+
+      # Keep deploy.sh on the VM in sync with the repo version.
+      - name: Upload deploy script to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: "deploy/scripts/deploy.sh"
+          target: "/opt/midswap/scripts/"
+          strip_components: 2
+
+      # SSH into the VM and run deploy.sh, passing the short SHA as the image
+      # tag. The script updates /opt/midswap/.env, pulls the image, and
+      # restarts the container.
+      - name: Run deploy script on VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_IP }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          # Pass the short commit SHA so we pin the running image to this exact
+          # build — makes rollback a one-liner: change IMAGE_TAG in .env + restart.
+          script: |
+            bash /opt/midswap/scripts/deploy.sh sha-$(echo "${{ github.sha }}" | cut -c1-7)

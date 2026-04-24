@@ -1,0 +1,63 @@
+# Production docker-compose for the Midswap orchestrator.
+#
+# The UI is NOT a Docker service here — Vite builds a static bundle that Nginx
+# serves directly from disk (/var/www/midswap/). Only the Node.js API needs
+# containerisation (for reproducibility and easy rollback).
+#
+# Runtime environment is provided by /opt/midswap/.env on the host.
+# That file is created by setup-vm.sh and updated by deploy.sh — it is
+# never committed to the repository because it contains secrets.
+
+services:
+  orchestrator:
+    # Image is built and pushed by GitHub Actions on every merge to main.
+    # GHCR_USER is set in /opt/midswap/.env (your GitHub username/org).
+    image: ghcr.io/${GHCR_USER}/midswap-orchestrator:${IMAGE_TAG:-latest}
+    container_name: midswap-orchestrator
+    restart: unless-stopped
+
+    # Bind only to the loopback interface — Nginx is the public entry point.
+    # This prevents the orchestrator from being reachable on the public IP
+    # even if the firewall rule is accidentally widened.
+    ports:
+      - "127.0.0.1:4000:4000"
+
+    volumes:
+      # SQLite database — persisted on the host so it survives container
+      # recreations and image updates.
+      - /opt/midswap/data:/data
+
+      # swap-state.json holds the deployed contract addresses.
+      # Generate it once with `npx tsx htlc-ft-cli/src/setup-contract.ts`,
+      # then scp it to the VM: scp swap-state.json deploy@VM:/opt/midswap/
+      - /opt/midswap/swap-state.json:/app/swap-state.json:ro
+
+    environment:
+      PORT: "4000"
+      HOST: "0.0.0.0"
+      DB_PATH: "/data/swaps.db"
+      SWAP_STATE_PATH: "/app/swap-state.json"
+      MIDNIGHT_NETWORK: "${MIDNIGHT_NETWORK:-preprod}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      # Your production domain, e.g. https://midswap.yourdomain.com
+      # Added to the CORS allowed-origins list alongside the hardcoded defaults.
+      CORS_ORIGINS: "${CORS_ORIGINS}"
+
+    # Secrets injected from /opt/midswap/.env (never checked in):
+    #   BLOCKFROST_API_KEY
+    #   STUCK_SWAP_WEBHOOK_URL   (optional Slack/Discord alerting)
+    env_file:
+      - /opt/midswap/.env
+
+    # Docker restarts the container if the health check fails three times.
+    # This matches the HEALTHCHECK in the Dockerfile.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:4000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
