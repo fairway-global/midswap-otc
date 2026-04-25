@@ -1,5 +1,5 @@
 /**
- * Midswap OTC header — ContraClear-style flat header.
+ * KAAMOS OTC header — minimal dark header with teal accents.
  *
  *   [ Logo ]   · · ·   [ Tabs ]   · · ·   [ Status + Wallet ]
  *
@@ -33,6 +33,7 @@ export const Header: React.FC = () => {
   const { session, cardano } = useSwapContext();
 
   const anyConnected = !!session || !!cardano;
+  const teal = '#2DD4BF';
 
   const isActive = (to: string): boolean =>
     location.pathname === to || (to !== '/' && location.pathname.startsWith(to));
@@ -44,8 +45,8 @@ export const Header: React.FC = () => {
         position: 'sticky',
         top: 0,
         zIndex: (t) => t.zIndex.appBar,
-        borderBottom: `1px solid ${theme.custom.borderSubtle}`,
-        bgcolor: theme.custom.surface1,
+        borderBottom: `1px solid ${alpha('#FFFFFF', 0.06)}`,
+        bgcolor: alpha('#000000', 0.8),
         backdropFilter: 'blur(18px)',
         WebkitBackdropFilter: 'blur(18px)',
       }}
@@ -75,14 +76,14 @@ export const Header: React.FC = () => {
                   py: 0.75,
                   fontSize: '0.72rem',
                   letterSpacing: '0.02em',
-                  color: isActive(to) ? theme.custom.cardanoBlue : theme.custom.textMuted,
-                  bgcolor: isActive(to) ? alpha(theme.custom.cardanoBlue, 0.1) : 'transparent',
+                  color: isActive(to) ? teal : alpha('#FFFFFF', 0.35),
+                  bgcolor: isActive(to) ? alpha(teal, 0.08) : 'transparent',
                   fontWeight: 500,
                   '&:hover': {
                     bgcolor: isActive(to)
-                      ? alpha(theme.custom.cardanoBlue, 0.15)
-                      : alpha('#ffffff', 0.03),
-                    color: isActive(to) ? theme.custom.cardanoBlue : theme.custom.textPrimary,
+                      ? alpha(teal, 0.12)
+                      : alpha('#ffffff', 0.04),
+                    color: isActive(to) ? teal : '#FFFFFF',
                   },
                 }}
               >
@@ -102,9 +103,9 @@ export const Header: React.FC = () => {
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                bgcolor: anyConnected ? theme.custom.terminalGreen : theme.custom.terminalRed,
+                bgcolor: anyConnected ? teal : theme.custom.terminalRed,
                 boxShadow: anyConnected
-                  ? `0 0 6px ${alpha(theme.custom.terminalGreen, 0.6)}`
+                  ? `0 0 6px ${alpha(teal, 0.6)}`
                   : `0 0 6px ${alpha(theme.custom.terminalRed, 0.6)}`,
               }}
             />
@@ -124,7 +125,13 @@ export const Header: React.FC = () => {
         anchor="right"
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        PaperProps={{ sx: { width: 260, bgcolor: theme.custom.surface1, borderLeft: `1px solid ${theme.custom.borderSubtle}` } }}
+        PaperProps={{
+          sx: {
+            width: 260,
+            bgcolor: '#000000',
+            borderLeft: `1px solid ${alpha('#FFFFFF', 0.06)}`,
+          },
+        }}
       >
         <Stack sx={{ p: 2 }}>
           <Stack direction="row" alignItems="center">
@@ -154,8 +161,8 @@ export const Header: React.FC = () => {
                     px: 1.5,
                     py: 0.75,
                     fontSize: '0.72rem',
-                    color: isActive(to) ? theme.custom.cardanoBlue : theme.custom.textMuted,
-                    bgcolor: isActive(to) ? alpha(theme.custom.cardanoBlue, 0.1) : 'transparent',
+                    color: isActive(to) ? teal : alpha('#FFFFFF', 0.35),
+                    bgcolor: isActive(to) ? alpha(teal, 0.08) : 'transparent',
                   }}
                 >
                   {label}

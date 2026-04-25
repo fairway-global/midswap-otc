@@ -1,13 +1,15 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
 import { resolve } from 'node:path';
+import { supabaseAuthPlugin } from './auth/middleware.js';
 import {
   resolveCardanoWatcherConfig,
   startCardanoWatcher,
   type CardanoWatcher,
 } from './cardano-watcher.js';
-import { openSwapStore } from './db.js';
+import { openDatabase, openOtcStore, openSwapStore } from './db.js';
 import { resolveWatcherConfig, startMidnightWatcher, type MidnightWatcher } from './midnight-watcher.js';
+import { authRoutes } from './routes/auth.js';
 import { swapsRoutes } from './routes/swaps.js';
 import {
   resolveStuckAlerterConfig,
@@ -19,7 +21,11 @@ const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const DB_PATH = process.env.DB_PATH ?? resolve(process.cwd(), 'swaps.db');
 
-const store = openSwapStore(DB_PATH);
+// One Database connection shared by both stores so the OTC bridge updates
+// (linkSwapToRfq / markRfqSettled) and the swap watchers see the same WAL.
+const db = openDatabase(DB_PATH);
+const otcStore = openOtcStore(db);
+const store = openSwapStore(db, otcStore);
 
 const app = Fastify({
   logger: {
@@ -42,12 +48,15 @@ const extraOrigins = (process.env.CORS_ORIGINS ?? '')
   .filter(Boolean);
 await app.register(cors, {
   origin: [...DEFAULT_ORIGINS, ...extraOrigins],
-  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 });
+
+await app.register(supabaseAuthPlugin, { store: otcStore });
 
 app.get('/health', async () => ({ ok: true, db: DB_PATH }));
 
 await app.register(swapsRoutes(store), { prefix: '/api' });
+await app.register(authRoutes(otcStore), { prefix: '/api' });
 
 let midnightWatcher: MidnightWatcher | null = null;
 const midnightWatcherConfig = resolveWatcherConfig(app.log);
@@ -73,6 +82,7 @@ const shutdown = async (signal: string) => {
   cardanoWatcher?.stop();
   stuckAlerter?.stop();
   await app.close();
+  // store.close() closes the shared db handle — both stores release together.
   store.close();
   process.exit(0);
 };

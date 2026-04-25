@@ -67,6 +67,16 @@ const validateCreateBody = (body: unknown): CreateSwapBody | string => {
     out.bobPkh = b.bobPkh.toLowerCase();
   }
 
+  // Optional bridge linkage to an OTC RFQ. Maker propagates this when the
+  // /swap?rfqId=... flow drove the lock. The orchestrator stamps the RFQ
+  // with swap_hash + status='Settling' on insert.
+  if (b.rfqId !== undefined) {
+    if (typeof b.rfqId !== 'string' || b.rfqId.length === 0 || b.rfqId.length > 64) {
+      return 'rfqId must be a non-empty string';
+    }
+    out.rfqId = b.rfqId;
+  }
+
   return out;
 };
 

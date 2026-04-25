@@ -1,14 +1,25 @@
 /**
- * Design system — Cardano-blue on Midnight-dark, ContraClear terminal layout.
+ * Design system — KAAMOS OTC.
  *
- *   background  midnight near-black with a violet undertone
- *   surface     layered dark navy for cards and inputs
- *   accent      Cardano royal blue — used for primary CTAs and focus rings
- *   radii       terminal-tight: 8 for panels, 6 for inputs, 999 for pills
- *   font        JetBrains Mono primary, Inter fallback (loaded in index.html)
+ *   Brand tokens (derived from the KAAMOS aurora logo):
+ *     #000000  background                          (pure black — night sky)
+ *     #FFFFFF  primary text / lines / icons        (white-as-primary)
+ *     #8A8A8A  secondary / muted                   (ghost lines)
+ *     #2DD4BF  Teal — main accent                  (active states, CTA, links)
+ *     #7C3AED  Aurora Violet — subtle glow only    (background atmosphere)
+ *     #06B6D4  Cyan — hover/bridge highlight        (cross-chain transitions)
  *
- * All custom tokens live on `theme.custom` so pages can reach them
- * without re-deriving palette math.
+ *   The dominant chrome is BLACK + WHITE. Teal is used for active states,
+ *   buttons, and interactive highlights. Violet/purple ONLY appears as
+ *   very faint background glows to evoke the aurora/night-sky atmosphere.
+ *   Never used in foreground text or UI chrome.
+ *
+ *   Radii: 6 inputs / 8 cards / 999 pills.
+ *   Fonts: Inter for hero h1–h3 + panel titles; JetBrains Mono everywhere else.
+ *
+ * Every legacy `theme.custom.*` key is preserved as an alias so existing
+ * call-sites (Header, SwapCard, MainLayout, WalletMenu, etc.) keep working
+ * without per-file edits.
  */
 
 import { createTheme, alpha, type ThemeOptions } from '@mui/material';
@@ -16,23 +27,30 @@ import { createTheme, alpha, type ThemeOptions } from '@mui/material';
 declare module '@mui/material/styles' {
   interface Theme {
     custom: {
+      // ── Brand tokens ────────────────────────────────────────
+      bg: string;
+      midnightIndigo: string;
+      cardanoBlue: string;
+      deepViolet: string;
+      bridgeCyan: string;
+      teal: string;
+      borderSubtle: string;
+      borderStrong: string;
+      textPrimary: string;
+      textSecondary: string;
+      textMuted: string;
+      success: string;
+      warning: string;
+      danger: string;
+      // ── Legacy aliases (read by Header/SwapCard/MainLayout/etc.) ──
       surface0: string;
       surface1: string;
       surface2: string;
       surface3: string;
-      borderSubtle: string;
-      borderStrong: string;
       accent: string;
       accentSoft: string;
       accentGradient: string;
-      cardanoBlue: string;
       midnightGlow: string;
-      success: string;
-      warning: string;
-      danger: string;
-      textPrimary: string;
-      textSecondary: string;
-      textMuted: string;
       terminalGreen: string;
       terminalRed: string;
     };
@@ -48,54 +66,76 @@ declare module '@mui/material/styles' {
   }
 }
 
-const cardanoBlue = '#2E7BFF';
-const cardanoBlueBright = '#4B8CFF';
-const cardanoBlueDeep = '#1A4FD1';
+// Brand palette — KAAMOS night sky
+const bg = '#000000';
+const teal = '#2DD4BF';            // Primary accent — teal from the aurora
+const auroraViolet = '#7C3AED';    // Glow-only — never used in foreground
+const deepViolet = '#1E1B4B';      // Depth glow
+const bridgeCyan = '#06B6D4';      // Cross-chain highlight
 
-const surface0 = '#0A0B13';
-const surface1 = '#12131E';
-const surface2 = '#1A1C2B';
-const surface3 = '#242738';
+// Legacy aliases — now mapped to teal-based palette
+const midnightIndigo = teal;       // Active states now use teal
+const cardanoBlue = teal;          // Chain affinity now uses teal
 
-const textPrimary = '#F5F7FA';
-const textSecondary = alpha('#F5F7FA', 0.64);
-const textMuted = alpha('#F5F7FA', 0.42);
+const textPrimary = '#FFFFFF';
+const textSecondary = '#8A8A8A';
+const textMuted = alpha('#FFFFFF', 0.35);
 
-const borderSubtle = alpha('#ffffff', 0.06);
-const borderStrong = alpha('#ffffff', 0.12);
+const borderSubtle = alpha('#FFFFFF', 0.08);
+const borderStrong = alpha('#FFFFFF', 0.16);
 
-const success = '#4ADE80';
-const warning = '#FBBF24';
-const danger = '#F87171';
+const success = '#22C55E';
+const warning = '#F59E0B';
+const danger = '#EF4444';
 
 const terminalGreen = '#39FF14';
 const terminalRed = '#FF3B3B';
 
-const accentGradient = `linear-gradient(135deg, ${cardanoBlueBright} 0%, ${cardanoBlue} 45%, ${cardanoBlueDeep} 100%)`;
-const midnightGlow = `radial-gradient(circle at 50% -10%, ${alpha(cardanoBlue, 0.22)} 0%, transparent 55%)`;
+// Surfaces — pure black; depth comes from borders only
+const surface0 = bg;
+const surface1 = bg;
+const surface2 = alpha('#FFFFFF', 0.03);
+const surface3 = alpha('#FFFFFF', 0.06);
 
-const monoStack = "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace";
-const sansStack = "'Inter', 'InterVariable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+// Teal gradient for CTA
+const accentGradient = `linear-gradient(135deg, ${teal} 0%, ${bridgeCyan} 100%)`;
+
+// Very subtle aurora atmosphere — teal top glow, violet bottom corner
+// These are barely-visible to give the night sky depth without
+// making the background look "blue" or "AI-startup"
+const midnightGlow = [
+  `radial-gradient(circle at 50% -10%, ${alpha(teal, 0.04)} 0%, transparent 55%)`,
+  `radial-gradient(circle at 95% 110%, ${alpha(auroraViolet, 0.03)} 0%, transparent 50%)`,
+  `radial-gradient(circle at 5% 105%, ${alpha(deepViolet, 0.06)} 0%, transparent 45%)`,
+].join(', ');
+
+const monoStack =
+  "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace";
+const sansStack =
+  "'Inter', 'InterVariable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 const options: ThemeOptions = {
   palette: {
     mode: 'dark',
     primary: {
-      main: cardanoBlue,
-      light: cardanoBlueBright,
-      dark: cardanoBlueDeep,
-      contrastText: '#ffffff',
+      main: teal,
+      light: '#5EEAD4',
+      dark: '#14B8A6',
+      contrastText: '#000000',
     },
     secondary: {
-      main: cardanoBlueBright,
+      main: bridgeCyan,
+      light: '#22D3EE',
+      dark: '#0891B2',
+      contrastText: '#000000',
     },
-    success: { main: success },
-    warning: { main: warning },
-    error: { main: danger },
-    info: { main: cardanoBlueBright },
+    info: { main: bridgeCyan, contrastText: bg },
+    success: { main: success, contrastText: bg },
+    warning: { main: warning, contrastText: bg },
+    error: { main: danger, contrastText: '#FFFFFF' },
     background: {
-      default: surface0,
-      paper: surface1,
+      default: bg,
+      paper: bg,
     },
     text: {
       primary: textPrimary,
@@ -103,77 +143,85 @@ const options: ThemeOptions = {
       disabled: textMuted,
     },
     divider: borderSubtle,
-    surface: { main: surface2, light: surface3, dark: surface1, contrastText: textPrimary },
+    surface: {
+      main: surface2,
+      light: surface3,
+      dark: bg,
+      contrastText: textPrimary,
+    },
   },
   typography: {
     fontFamily: monoStack,
     h1: { fontWeight: 700, letterSpacing: '-0.02em', fontFamily: sansStack },
     h2: { fontWeight: 700, letterSpacing: '-0.02em', fontFamily: sansStack },
     h3: { fontWeight: 700, letterSpacing: '-0.02em', fontSize: '2.25rem', fontFamily: sansStack },
-    h4: { fontWeight: 600, letterSpacing: '-0.015em', fontSize: '1.65rem', fontFamily: sansStack },
-    h5: { fontWeight: 600, letterSpacing: '-0.01em', fontSize: '1.25rem', fontFamily: sansStack },
-    h6: { fontWeight: 600, letterSpacing: '-0.01em', fontFamily: sansStack },
+    h4: { fontWeight: 600, letterSpacing: '-0.015em', fontSize: '1.5rem', fontFamily: sansStack },
+    h5: { fontWeight: 600, letterSpacing: '-0.01em', fontSize: '1.15rem' },
+    h6: { fontWeight: 600, letterSpacing: '-0.01em' },
     subtitle1: { fontWeight: 500 },
     subtitle2: { fontWeight: 500 },
-    button: { fontWeight: 600, textTransform: 'none', letterSpacing: 0 },
+    button: { fontWeight: 600, textTransform: 'none', letterSpacing: '0.01em' },
     body1: { fontSize: '0.88rem', lineHeight: 1.55 },
     body2: { fontSize: '0.8rem', lineHeight: 1.5 },
-    caption: { letterSpacing: '0.02em', fontSize: '0.72rem' },
+    caption: { letterSpacing: '0.04em', fontSize: '0.7rem' },
+    overline: { letterSpacing: '0.16em', fontSize: '0.66rem', fontWeight: 600 },
     allVariants: { color: textPrimary },
   },
   shape: { borderRadius: 8 },
   custom: {
+    bg,
+    midnightIndigo,
+    cardanoBlue,
+    deepViolet,
+    bridgeCyan,
+    teal,
+    borderSubtle,
+    borderStrong,
+    textPrimary,
+    textSecondary,
+    textMuted,
+    success,
+    warning,
+    danger,
+    // legacy aliases
     surface0,
     surface1,
     surface2,
     surface3,
-    borderSubtle,
-    borderStrong,
-    accent: cardanoBlue,
-    accentSoft: alpha(cardanoBlue, 0.16),
+    accent: teal,
+    accentSoft: alpha(teal, 0.12),
     accentGradient,
-    cardanoBlue,
     midnightGlow,
-    success,
-    warning,
-    danger,
-    textPrimary,
-    textSecondary,
-    textMuted,
     terminalGreen,
     terminalRed,
   },
   components: {
     MuiCssBaseline: {
       styleOverrides: {
-        ':root': {
-          colorScheme: 'dark',
-        },
+        ':root': { colorScheme: 'dark' },
         html: {
           WebkitFontSmoothing: 'antialiased',
           MozOsxFontSmoothing: 'grayscale',
         },
         body: {
-          backgroundColor: surface0,
+          backgroundColor: bg,
           backgroundImage: midnightGlow,
           backgroundAttachment: 'fixed',
           backgroundRepeat: 'no-repeat',
         },
-        'code, kbd, pre, samp': {
-          fontFamily: monoStack,
-        },
+        'code, kbd, pre, samp': { fontFamily: monoStack },
         '*::selection': {
-          background: alpha(cardanoBlue, 0.35),
+          background: alpha(teal, 0.35),
           color: textPrimary,
         },
         '*::-webkit-scrollbar': { width: 6, height: 6 },
-        '*::-webkit-scrollbar-track': { background: surface0 },
+        '*::-webkit-scrollbar-track': { background: bg },
         '*::-webkit-scrollbar-thumb': {
-          background: alpha('#ffffff', 0.08),
+          background: alpha('#FFFFFF', 0.08),
           borderRadius: 3,
         },
         '*::-webkit-scrollbar-thumb:hover': {
-          background: alpha('#ffffff', 0.14),
+          background: alpha('#FFFFFF', 0.16),
         },
       },
     },
@@ -183,7 +231,7 @@ const options: ThemeOptions = {
         root: {
           backgroundImage: 'none',
           borderRadius: 8,
-          backgroundColor: surface1,
+          backgroundColor: bg,
           border: `1px solid ${borderSubtle}`,
         },
       },
@@ -192,7 +240,7 @@ const options: ThemeOptions = {
       defaultProps: { elevation: 0 },
       styleOverrides: {
         root: {
-          backgroundColor: surface1,
+          backgroundColor: bg,
           border: `1px solid ${borderSubtle}`,
           borderRadius: 8,
         },
@@ -223,35 +271,45 @@ const options: ThemeOptions = {
           fontSize: '0.88rem',
         },
         containedPrimary: {
-          background: accentGradient,
-          boxShadow: `0 8px 24px ${alpha(cardanoBlue, 0.25)}`,
+          background: teal,
+          color: '#000000',
+          boxShadow: `0 6px 20px ${alpha(teal, 0.25)}`,
           '&:hover': {
-            background: accentGradient,
-            boxShadow: `0 10px 30px ${alpha(cardanoBlue, 0.38)}`,
-            filter: 'brightness(1.1)',
+            background: '#5EEAD4',
+            boxShadow: `0 8px 28px ${alpha(teal, 0.4)}`,
           },
           '&.Mui-disabled': {
-            background: alpha(cardanoBlue, 0.22),
-            color: alpha('#ffffff', 0.5),
+            background: alpha(teal, 0.18),
+            color: alpha('#FFFFFF', 0.4),
             boxShadow: 'none',
           },
         },
         containedSecondary: {
-          backgroundColor: alpha(cardanoBlue, 0.16),
-          color: cardanoBlueBright,
-          '&:hover': { backgroundColor: alpha(cardanoBlue, 0.26) },
+          background: bridgeCyan,
+          color: '#000000',
+          '&:hover': { background: '#22D3EE' },
         },
         outlinedPrimary: {
-          borderColor: alpha(cardanoBlue, 0.4),
-          color: cardanoBlueBright,
+          borderColor: borderStrong,
+          color: textPrimary,
           '&:hover': {
-            borderColor: cardanoBlueBright,
-            backgroundColor: alpha(cardanoBlue, 0.08),
+            borderColor: teal,
+            color: teal,
+            backgroundColor: alpha(teal, 0.06),
+          },
+        },
+        outlinedSecondary: {
+          borderColor: borderStrong,
+          color: textPrimary,
+          '&:hover': {
+            borderColor: bridgeCyan,
+            color: '#FFFFFF',
+            backgroundColor: alpha(bridgeCyan, 0.12),
           },
         },
         text: {
           color: textSecondary,
-          '&:hover': { backgroundColor: alpha('#ffffff', 0.04), color: textPrimary },
+          '&:hover': { backgroundColor: alpha('#FFFFFF', 0.04), color: textPrimary },
         },
       },
     },
@@ -260,29 +318,24 @@ const options: ThemeOptions = {
         root: {
           borderRadius: 6,
           color: textSecondary,
-          '&:hover': {
-            color: textPrimary,
-            backgroundColor: alpha('#ffffff', 0.05),
-          },
+          '&:hover': { color: textPrimary, backgroundColor: alpha('#FFFFFF', 0.05) },
         },
       },
     },
-    MuiTextField: {
-      defaultProps: { variant: 'outlined' },
-    },
+    MuiTextField: { defaultProps: { variant: 'outlined' } },
     MuiOutlinedInput: {
       styleOverrides: {
         root: {
           borderRadius: 6,
           fontFamily: monoStack,
           fontSize: '0.82rem',
-          backgroundColor: alpha('#ffffff', 0.02),
+          backgroundColor: bg,
           transition: 'border-color 140ms ease, background-color 140ms ease',
           '& fieldset': { borderColor: borderSubtle },
           '&:hover fieldset': { borderColor: borderStrong },
           '&.Mui-focused': {
-            backgroundColor: alpha(cardanoBlue, 0.05),
-            '& fieldset': { borderColor: cardanoBlue, borderWidth: 1 },
+            backgroundColor: alpha(teal, 0.03),
+            '& fieldset': { borderColor: teal, borderWidth: 1 },
           },
         },
         input: { padding: '12px 14px' },
@@ -294,7 +347,7 @@ const options: ThemeOptions = {
           color: textMuted,
           fontFamily: monoStack,
           fontSize: '0.78rem',
-          '&.Mui-focused': { color: cardanoBlueBright },
+          '&.Mui-focused': { color: teal },
         },
       },
     },
@@ -304,35 +357,18 @@ const options: ThemeOptions = {
           borderRadius: 4,
           fontWeight: 500,
           fontFamily: monoStack,
-          fontSize: '0.68rem',
-          letterSpacing: '0.04em',
+          fontSize: '0.66rem',
+          letterSpacing: '0.06em',
           textTransform: 'uppercase' as const,
-          height: 24,
+          height: 22,
         },
-        outlined: {
-          borderColor: borderStrong,
-          color: textSecondary,
-        },
-        colorSuccess: {
-          backgroundColor: alpha(success, 0.16),
-          color: success,
-        },
-        colorError: {
-          backgroundColor: alpha(danger, 0.18),
-          color: danger,
-        },
-        colorWarning: {
-          backgroundColor: alpha(warning, 0.18),
-          color: warning,
-        },
-        colorInfo: {
-          backgroundColor: alpha(cardanoBlueBright, 0.18),
-          color: cardanoBlueBright,
-        },
-        colorPrimary: {
-          backgroundColor: alpha(cardanoBlue, 0.2),
-          color: cardanoBlueBright,
-        },
+        outlined: { borderColor: borderStrong, color: textSecondary },
+        colorSuccess: { backgroundColor: alpha(success, 0.16), color: success },
+        colorError: { backgroundColor: alpha(danger, 0.18), color: danger },
+        colorWarning: { backgroundColor: alpha(warning, 0.18), color: warning },
+        colorInfo: { backgroundColor: alpha(bridgeCyan, 0.16), color: bridgeCyan },
+        colorPrimary: { backgroundColor: alpha(teal, 0.14), color: teal },
+        colorSecondary: { backgroundColor: alpha(bridgeCyan, 0.18), color: bridgeCyan },
       },
     },
     MuiAlert: {
@@ -340,17 +376,17 @@ const options: ThemeOptions = {
         root: {
           borderRadius: 6,
           border: `1px solid ${borderSubtle}`,
-          backgroundColor: surface1,
+          backgroundColor: bg,
           padding: '8px 12px',
           alignItems: 'center',
           fontFamily: monoStack,
           fontSize: '0.78rem',
         },
         standardInfo: {
-          backgroundColor: alpha(cardanoBlue, 0.1),
-          borderColor: alpha(cardanoBlue, 0.25),
+          backgroundColor: alpha(teal, 0.06),
+          borderColor: alpha(teal, 0.2),
           color: textPrimary,
-          '& .MuiAlert-icon': { color: cardanoBlueBright },
+          '& .MuiAlert-icon': { color: teal },
         },
         standardSuccess: {
           backgroundColor: alpha(success, 0.08),
@@ -371,32 +407,32 @@ const options: ThemeOptions = {
           '& .MuiAlert-icon': { color: danger },
         },
         filledInfo: {
-          backgroundColor: cardanoBlue,
-          color: '#ffffff',
+          backgroundColor: teal,
+          color: '#000000',
           border: 'none',
-          '& .MuiAlert-icon': { color: '#ffffff' },
-          '& .MuiAlert-action .MuiIconButton-root': { color: '#ffffff' },
+          '& .MuiAlert-icon': { color: '#000000' },
+          '& .MuiAlert-action .MuiIconButton-root': { color: '#000000' },
         },
         filledSuccess: {
           backgroundColor: success,
-          color: '#0a0b13',
+          color: bg,
           border: 'none',
-          '& .MuiAlert-icon': { color: '#0a0b13' },
-          '& .MuiAlert-action .MuiIconButton-root': { color: '#0a0b13' },
+          '& .MuiAlert-icon': { color: bg },
+          '& .MuiAlert-action .MuiIconButton-root': { color: bg },
         },
         filledWarning: {
           backgroundColor: warning,
-          color: '#0a0b13',
+          color: bg,
           border: 'none',
-          '& .MuiAlert-icon': { color: '#0a0b13' },
-          '& .MuiAlert-action .MuiIconButton-root': { color: '#0a0b13' },
+          '& .MuiAlert-icon': { color: bg },
+          '& .MuiAlert-action .MuiIconButton-root': { color: bg },
         },
         filledError: {
           backgroundColor: danger,
-          color: '#ffffff',
+          color: '#FFFFFF',
           border: 'none',
-          '& .MuiAlert-icon': { color: '#ffffff' },
-          '& .MuiAlert-action .MuiIconButton-root': { color: '#ffffff' },
+          '& .MuiAlert-icon': { color: '#FFFFFF' },
+          '& .MuiAlert-action .MuiIconButton-root': { color: '#FFFFFF' },
         },
       },
     },
@@ -404,7 +440,7 @@ const options: ThemeOptions = {
       defaultProps: { elevation: 0 },
       styleOverrides: {
         root: {
-          backgroundColor: surface1,
+          backgroundColor: bg,
           backdropFilter: 'blur(18px)',
           WebkitBackdropFilter: 'blur(18px)',
           borderBottom: `1px solid ${borderSubtle}`,
@@ -421,7 +457,7 @@ const options: ThemeOptions = {
     MuiDialog: {
       styleOverrides: {
         paper: {
-          backgroundColor: surface1,
+          backgroundColor: bg,
           backgroundImage: 'none',
           border: `1px solid ${borderSubtle}`,
           borderRadius: 8,
@@ -431,23 +467,23 @@ const options: ThemeOptions = {
     MuiTooltip: {
       styleOverrides: {
         tooltip: {
-          backgroundColor: surface3,
+          backgroundColor: '#111111',
           color: textPrimary,
-          border: `1px solid ${borderStrong}`,
+          border: `1px solid ${alpha(teal, 0.2)}`,
           fontSize: 11,
           fontWeight: 500,
           fontFamily: monoStack,
           borderRadius: 4,
           padding: '5px 8px',
         },
-        arrow: { color: surface3 },
+        arrow: { color: '#111111' },
       },
     },
     MuiLinearProgress: {
       styleOverrides: {
         root: {
           borderRadius: 999,
-          backgroundColor: alpha('#ffffff', 0.06),
+          backgroundColor: alpha('#FFFFFF', 0.06),
         },
         bar: { background: accentGradient },
       },
@@ -459,9 +495,9 @@ const options: ThemeOptions = {
             color: textMuted,
             fontWeight: 600,
             fontFamily: monoStack,
-            fontSize: '0.68rem',
+            fontSize: '0.66rem',
             textTransform: 'uppercase',
-            letterSpacing: '0.06em',
+            letterSpacing: '0.08em',
             borderBottomColor: borderSubtle,
             padding: '10px 14px',
           },
@@ -481,7 +517,7 @@ const options: ThemeOptions = {
     MuiSnackbarContent: {
       styleOverrides: {
         root: {
-          backgroundColor: surface2,
+          backgroundColor: bg,
           color: textPrimary,
           border: `1px solid ${borderSubtle}`,
           borderRadius: 6,
@@ -493,7 +529,7 @@ const options: ThemeOptions = {
       defaultProps: { underline: 'hover' },
       styleOverrides: {
         root: {
-          color: cardanoBlueBright,
+          color: teal,
           fontWeight: 500,
           '&:hover': { color: textPrimary },
         },

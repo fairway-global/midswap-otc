@@ -1,21 +1,57 @@
 /**
- * Midswap OTC — full-screen hero landing page.
+ * KAAMOS OTC — full-screen hero landing page.
  *
- * ContraClear-inspired cinematic intro with a "Launch App" CTA
- * that routes to the OTC workspace. This is the first thing a visitor
- * sees — clean, dramatic, minimal text.
+ * Night-sky aesthetic:
+ *   - Pure black background
+ *   - Scattered white starry dots (CSS-generated)
+ *   - Subtle teal + violet aurora glows behind key elements
+ *   - KAAMOS logo large and centered
+ *   - Teal CTA button, white text throughout
  */
 
 import React from 'react';
 import { Box, Button, Stack, Typography } from '@mui/material';
-import { alpha, useTheme } from '@mui/material/styles';
+import { alpha, useTheme, keyframes } from '@mui/material/styles';
 import { useNavigate } from 'react-router-dom';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
-import { Logo } from './Layout/Logo';
+
+/* ── Animations ─────────────────────────────────────────────────── */
+const twinkle = keyframes`
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+`;
+
+const drift = keyframes`
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+`;
+
+const glowPulse = keyframes`
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.8; }
+`;
+
+/* ── Starfield: generates randomised CSS stars ──────────────────── */
+function generateStars(count: number, maxSize: number = 2): string {
+  const stars: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * 100;
+    const y = Math.random() * 100;
+    const size = Math.random() * maxSize + 0.5;
+    stars.push(`${x}vw ${y}vh 0 ${size - 0.5}px rgba(255,255,255,${0.15 + Math.random() * 0.5})`);
+  }
+  return stars.join(', ');
+}
+
+const STARS_SMALL = generateStars(80, 1.2);
+const STARS_MEDIUM = generateStars(30, 2);
+const STARS_BRIGHT = generateStars(8, 2.5);
 
 export const LandingPage: React.FC = () => {
   const theme = useTheme();
   const navigate = useNavigate();
+  const teal = '#25b9a6ff';
+  const violet = '#7C3AED';
 
   return (
     <Box
@@ -25,101 +61,79 @@ export const LandingPage: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        bgcolor: theme.custom.surface0,
-        // Homepage uses JetBrains Mono throughout — matches the terminal
-        // aesthetic of the product surface. The app theme otherwise puts
-        // headings (h1-h6) in Inter; force mono for every Typography and
-        // Button on this page so the headline and box titles match the
-        // eyebrows, body, button, and footer.
+        bgcolor: '#000000',
         fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace",
         '& .MuiTypography-root, & .MuiButton-root': {
           fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Consolas, 'Liberation Mono', monospace",
         },
       }}
     >
-      {/* === Background layers === */}
+      {/* ═══ STARFIELD ═══ */}
+      <Box
+        aria-hidden="true"
+        sx={{
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            inset: 0,
+            boxShadow: STARS_SMALL,
+          },
+          '&::after': {
+            content: '""',
+            position: 'absolute',
+            inset: 0,
+            boxShadow: STARS_MEDIUM,
+            animation: `${twinkle} 4s ease-in-out infinite`,
+          },
+        }}
+      />
+      {/* Bright stars — slower twinkle */}
+      <Box
+        aria-hidden="true"
+        sx={{
+          position: 'fixed',
+          inset: 0,
+          pointerEvents: 'none',
+          boxShadow: STARS_BRIGHT,
+          animation: `${twinkle} 6s ease-in-out infinite 1s`,
+        }}
+      />
 
-      {/* Radial glow — top center */}
+      {/* ═══ AURORA GLOW — behind hero content ═══ */}
+      {/* Teal aurora — top center, very subtle */}
       <Box
         aria-hidden="true"
         sx={{
           position: 'absolute',
-          top: '-20%',
+          top: '10%',
           left: '50%',
           transform: 'translateX(-50%)',
-          width: '130vw',
-          height: '80vh',
-          background: `radial-gradient(ellipse at center, ${alpha(
-            theme.custom.cardanoBlue,
-            0.14,
-          )} 0%, transparent 60%)`,
+          width: '80vw',
+          height: '50vh',
+          background: `radial-gradient(ellipse at center, ${alpha(teal, 0.06)} 0%, transparent 70%)`,
           pointerEvents: 'none',
+          animation: `${glowPulse} 8s ease-in-out infinite`,
         }}
       />
-
-      {/* Secondary glow — violet accent bottom-right */}
+      {/* Violet aurora — bottom left, barely visible */}
       <Box
         aria-hidden="true"
         sx={{
           position: 'absolute',
-          bottom: '-10%',
-          right: '-5%',
-          width: '60vw',
-          height: '60vh',
-          background: `radial-gradient(ellipse at center, ${alpha(
-            '#6B7CFF',
-            0.08,
-          )} 0%, transparent 60%)`,
+          bottom: '5%',
+          left: '10%',
+          width: '50vw',
+          height: '40vh',
+          background: `radial-gradient(ellipse at center, ${alpha(violet, 0.04)} 0%, transparent 65%)`,
           pointerEvents: 'none',
+          animation: `${glowPulse} 10s ease-in-out infinite 2s`,
         }}
       />
 
-      {/* Grid overlay */}
-      <Box
-        aria-hidden="true"
-        sx={{
-          position: 'absolute',
-          inset: 0,
-          opacity: 0.35,
-          backgroundImage:
-            'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
-          pointerEvents: 'none',
-        }}
-      />
-
-      {/* Floating particles — subtle decorative elements */}
-      {[
-        { top: '15%', left: '10%', size: 3, delay: '0s' },
-        { top: '25%', right: '15%', size: 2, delay: '1.5s' },
-        { top: '60%', left: '20%', size: 2, delay: '0.8s' },
-        { top: '70%', right: '25%', size: 3, delay: '2s' },
-        { top: '40%', left: '80%', size: 2, delay: '0.4s' },
-      ].map((p, i) => (
-        <Box
-          key={i}
-          aria-hidden="true"
-          sx={{
-            position: 'absolute',
-            top: p.top,
-            left: p.left,
-            right: p.right,
-            width: p.size,
-            height: p.size,
-            borderRadius: '50%',
-            bgcolor: alpha(theme.custom.cardanoBlue, 0.5),
-            animation: `float 4s ease-in-out infinite`,
-            animationDelay: p.delay,
-            pointerEvents: 'none',
-            '@keyframes float': {
-              '0%, 100%': { transform: 'translateY(0px)', opacity: 0.5 },
-              '50%': { transform: 'translateY(-12px)', opacity: 1 },
-            },
-          }}
-        />
-      ))}
-
-      {/* === Top bar === */}
+      {/* ═══ TOP BAR ═══ */}
       <Box
         sx={{
           position: 'relative',
@@ -131,18 +145,41 @@ export const LandingPage: React.FC = () => {
           py: 2.5,
         }}
       >
-        <Logo />
+        {/* Small logo in header */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box
+            component="img"
+            src="/kaamos-logo.png"
+            alt="KAAMOS"
+            sx={{ height: 30, width: 'auto' }}
+          />
+          <Typography
+            component="span"
+            sx={{
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              letterSpacing: '0.16em',
+              color: '#FFFFFF',
+              textTransform: 'uppercase',
+              fontFamily: "'Inter', sans-serif",
+            }}
+          >
+            KAAMOS
+          </Typography>
+        </Box>
+
         <Button
           variant="outlined"
           size="small"
           onClick={() => navigate('/app')}
           sx={{
-            borderColor: theme.custom.borderStrong,
-            color: theme.custom.textSecondary,
+            borderColor: alpha('#FFFFFF', 0.2),
+            color: alpha('#FFFFFF', 0.7),
             fontSize: '0.7rem',
             '&:hover': {
-              borderColor: theme.custom.cardanoBlue,
-              color: theme.custom.cardanoBlue,
+              borderColor: teal,
+              color: teal,
+              backgroundColor: alpha(teal, 0.06),
             },
           }}
         >
@@ -150,7 +187,7 @@ export const LandingPage: React.FC = () => {
         </Button>
       </Box>
 
-      {/* === Main hero content === */}
+      {/* ═══ HERO CONTENT ═══ */}
       <Box
         sx={{
           position: 'relative',
@@ -172,8 +209,8 @@ export const LandingPage: React.FC = () => {
               alignItems: 'center',
               gap: 1,
               borderRadius: 1,
-              border: `1px solid ${alpha(theme.custom.cardanoBlue, 0.3)}`,
-              bgcolor: alpha(theme.custom.cardanoBlue, 0.05),
+              border: `1px solid ${alpha(teal, 0.25)}`,
+              bgcolor: alpha(teal, 0.04),
               px: 1.5,
               py: 0.75,
             }}
@@ -183,12 +220,9 @@ export const LandingPage: React.FC = () => {
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                bgcolor: theme.custom.cardanoBlue,
-                animation: 'pulse 2s infinite',
-                '@keyframes pulse': {
-                  '0%, 100%': { opacity: 1 },
-                  '50%': { opacity: 0.4 },
-                },
+                bgcolor: teal,
+                animation: `${glowPulse} 2s infinite`,
+                boxShadow: `0 0 6px ${alpha(teal, 0.5)}`,
               }}
             />
             <Typography
@@ -196,7 +230,7 @@ export const LandingPage: React.FC = () => {
                 fontSize: '0.6rem',
                 letterSpacing: '0.3em',
                 textTransform: 'uppercase',
-                color: theme.custom.cardanoBlue,
+                color: teal,
                 fontWeight: 500,
               }}
             >
@@ -204,7 +238,7 @@ export const LandingPage: React.FC = () => {
             </Typography>
           </Box>
 
-          {/* Headline */}
+          {/* Headline — white with teal accent word */}
           <Typography
             variant="h1"
             sx={{
@@ -212,16 +246,15 @@ export const LandingPage: React.FC = () => {
               fontSize: { xs: '2.4rem', md: '3.6rem' },
               lineHeight: 1.1,
               letterSpacing: '-0.03em',
+              color: '#FFFFFF',
             }}
           >
             Private cross-chain{' '}
             <Box
               component="span"
               sx={{
-                backgroundImage: theme.custom.accentGradient,
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
+                color: teal,
+                textShadow: `0 0 40px ${alpha(teal, 0.3)}`,
               }}
             >
               OTC settlement
@@ -231,7 +264,7 @@ export const LandingPage: React.FC = () => {
           {/* Subtitle */}
           <Typography
             sx={{
-              color: theme.custom.textSecondary,
+              color: alpha('#FFFFFF', 0.5),
               fontSize: { xs: '0.84rem', md: '0.95rem' },
               maxWidth: 540,
               lineHeight: 1.7,
@@ -241,7 +274,7 @@ export const LandingPage: React.FC = () => {
             No custodian. No bridge. No trust required.
           </Typography>
 
-          {/* CTA */}
+          {/* CTA — teal button, black text */}
           <Button
             variant="contained"
             size="large"
@@ -251,15 +284,22 @@ export const LandingPage: React.FC = () => {
               px: 4,
               py: 1.75,
               fontSize: '0.88rem',
-              fontWeight: 600,
+              fontWeight: 700,
               borderRadius: 1.5,
+              bgcolor: teal,
+              color: '#000000',
+              boxShadow: `0 0 30px ${alpha(teal, 0.25)}, 0 6px 20px ${alpha(teal, 0.15)}`,
+              '&:hover': {
+                bgcolor: '#5EEAD4',
+                boxShadow: `0 0 40px ${alpha(teal, 0.35)}, 0 8px 28px ${alpha(teal, 0.25)}`,
+              },
             }}
           >
             Launch App
           </Button>
         </Stack>
 
-        {/* Feature pills — minimal, ContraClear style */}
+        {/* ═══ FEATURE CARDS ═══ */}
         <Box
           sx={{
             mt: 8,
@@ -295,11 +335,33 @@ export const LandingPage: React.FC = () => {
             <Box
               key={i}
               sx={{
+                position: 'relative',
                 p: 2.5,
                 borderRadius: 2,
-                border: `1px solid ${theme.custom.borderSubtle}`,
-                bgcolor: alpha(theme.custom.surface1, 0.6),
+                border: `1px solid ${alpha('#FFFFFF', 0.08)}`,
+                bgcolor: alpha('#FFFFFF', 0.02),
                 backdropFilter: 'blur(8px)',
+                overflow: 'hidden',
+                transition: 'border-color 200ms ease, box-shadow 200ms ease',
+                '&:hover': {
+                  borderColor: alpha(teal, 0.25),
+                  boxShadow: `0 0 20px ${alpha(teal, 0.06)}, inset 0 0 20px ${alpha(teal, 0.02)}`,
+                },
+                // Subtle aurora glow behind each card
+                '&::before': {
+                  content: '""',
+                  position: 'absolute',
+                  top: '-50%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: '120%',
+                  height: '100%',
+                  background: `radial-gradient(ellipse at center, ${alpha(
+                    i % 2 === 0 ? teal : violet,
+                    0.03,
+                  )} 0%, transparent 70%)`,
+                  pointerEvents: 'none',
+                },
               }}
             >
               <Typography
@@ -307,9 +369,11 @@ export const LandingPage: React.FC = () => {
                   fontSize: '0.58rem',
                   letterSpacing: '0.2em',
                   textTransform: 'uppercase',
-                  color: theme.custom.cardanoBlue,
+                  color: teal,
                   fontWeight: 500,
                   mb: 0.75,
+                  position: 'relative',
+                  zIndex: 1,
                 }}
               >
                 {f.eyebrow}
@@ -318,17 +382,21 @@ export const LandingPage: React.FC = () => {
                 sx={{
                   fontWeight: 600,
                   fontSize: '0.84rem',
-                  color: theme.custom.textPrimary,
+                  color: '#FFFFFF',
                   mb: 0.5,
+                  position: 'relative',
+                  zIndex: 1,
                 }}
               >
                 {f.title}
               </Typography>
               <Typography
                 sx={{
-                  color: theme.custom.textMuted,
+                  color: alpha('#FFFFFF', 0.4),
                   fontSize: '0.68rem',
                   lineHeight: 1.6,
+                  position: 'relative',
+                  zIndex: 1,
                 }}
               >
                 {f.text}
@@ -338,13 +406,13 @@ export const LandingPage: React.FC = () => {
         </Box>
       </Box>
 
-      {/* === Footer === */}
+      {/* ═══ FOOTER ═══ */}
       <Box
         component="footer"
         sx={{
           position: 'relative',
           zIndex: 2,
-          borderTop: `1px solid ${theme.custom.borderSubtle}`,
+          borderTop: `1px solid ${alpha('#FFFFFF', 0.06)}`,
           px: { xs: 3, md: 5 },
           py: 1.5,
         }}
@@ -358,16 +426,16 @@ export const LandingPage: React.FC = () => {
           <Typography
             sx={{
               fontSize: '0.62rem',
-              color: theme.custom.textMuted,
+              color: alpha('#FFFFFF', 0.25),
               letterSpacing: '0.02em',
             }}
           >
-            Midswap OTC · Cross-chain atomic settlement
+            KAAMOS · Cross-chain atomic settlement
           </Typography>
           <Typography
             sx={{
               fontSize: '0.62rem',
-              color: theme.custom.textMuted,
+              color: alpha('#FFFFFF', 0.25),
               letterSpacing: '0.02em',
             }}
           >

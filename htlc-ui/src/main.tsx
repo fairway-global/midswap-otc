@@ -27,15 +27,15 @@ logger.trace(`networkId = ${networkId}`);
 // most recent `npm run build`.
 const BUILD_TIME = __BUILD_TIME__;
 console.info(
-  `%c[Midswap] Bundle built at ${BUILD_TIME}`,
-  'color: #4B8CFF; font-weight: 600;',
+  `%c[KAAMOS] Bundle built at ${BUILD_TIME}`,
+  'color: #00637c; font-weight: 600;',
 );
 (window as unknown as { __MIDSWAP_BUILD_TIME__: string }).__MIDSWAP_BUILD_TIME__ = BUILD_TIME;
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <CssBaseline />
     <ThemeProvider theme={theme}>
+      <CssBaseline />
       <ToastProvider>
         <SwapProvider logger={logger}>
           <App />
