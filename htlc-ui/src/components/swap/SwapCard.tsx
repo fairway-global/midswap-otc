@@ -154,9 +154,9 @@ export const SwapCard: React.FC = () => {
   // OTC bridge: when ?rfqId is set on the URL and there's no ?hash, the
   // originator is being routed in from RfqDetail to drive the maker side
   // of an accepted order. Fetch the RFQ and hydrate amounts + counterparty
-  // from the wallet snapshot taken at quote-accept time. Manual
-  // counterparty inputs are suppressed in this mode (CounterpartyBoundCard
-  // shown instead) and `rfqId` is propagated through createSwap.
+  // from the wallet snapshot taken at quote-accept time. The counterparty
+  // inputs render pre-filled and read-only with a "bound from order"
+  // badge, and `rfqId` is propagated through createSwap.
   const rfqIdFromUrl = searchParams.get('rfqId');
   const [rfqContext, setRfqContext] = useState<{ rfq: Rfq; provider: WalletSnapshot } | null>(null);
   const rfqHydratedRef = React.useRef(false);
@@ -645,25 +645,27 @@ export const SwapCard: React.FC = () => {
           </Box>
 
           {/* Counterparty input — differs by direction. When the maker arrived
-              via /swap?rfqId=… the keys come from the RFQ snapshot, so the
-              manual inputs are replaced with a bound badge. */}
-          {role === 'maker' && rfqContext && (
-            <CounterpartyBoundCard rfq={rfqContext.rfq} provider={rfqContext.provider} />
-          )}
-          {role === 'maker' && !rfqContext && flowDirection === 'usdm-usdc' && (
+              via /swap?rfqId=… the keys are pre-filled from the RFQ snapshot
+              and the inputs become read-only with a "bound from order" badge.
+              Edits are blocked because a typo would silently desync from the
+              snapshot the LP committed to (their watcher would never see the
+              maker's deposit). */}
+          {role === 'maker' && flowDirection === 'usdm-usdc' && (
             <Box sx={{ mt: 2 }}>
-              <Typography
-                sx={{
-                  fontSize: '0.64rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  color: theme.custom.textMuted,
-                  mb: 1,
-                }}
-              >
-                Counterparty Wallet
-              </Typography>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <Typography
+                  sx={{
+                    fontSize: '0.64rem',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: theme.custom.textMuted,
+                  }}
+                >
+                  Counterparty Wallet
+                </Typography>
+                {rfqContext && <BoundBadge reference={rfqContext.rfq.reference} />}
+              </Stack>
               <TextField
                 size="small"
                 fullWidth
@@ -671,13 +673,16 @@ export const SwapCard: React.FC = () => {
                 value={counterpartyCardano}
                 onChange={(e) => setCounterpartyCardano(e.target.value)}
                 placeholder="addr_test1… or 56-hex PKH"
-                error={counterpartyCardano.trim().length > 0 && !resolvedCounterpartyPkh}
+                error={!rfqContext && counterpartyCardano.trim().length > 0 && !resolvedCounterpartyPkh}
+                disabled={!!rfqContext}
                 helperText={
-                  counterpartyCardano.trim().length === 0
-                    ? 'Bind the USDM lock to their Cardano wallet.'
-                    : resolvedCounterpartyPkh
-                      ? `PKH ${resolvedCounterpartyPkh.slice(0, 16)}…`
-                      : 'Not a valid Cardano address or 56-hex PKH.'
+                  rfqContext
+                    ? `Auto-bound from ${rfqContext.rfq.reference}. ${rfqContext.rfq.selectedProviderName ?? 'Counterparty'} will receive the USDM here.`
+                    : counterpartyCardano.trim().length === 0
+                      ? 'Bind the USDM lock to their Cardano wallet.'
+                      : resolvedCounterpartyPkh
+                        ? `PKH ${resolvedCounterpartyPkh.slice(0, 16)}…`
+                        : 'Not a valid Cardano address or 56-hex PKH.'
                 }
                 InputProps={{
                   startAdornment: (
@@ -690,42 +695,47 @@ export const SwapCard: React.FC = () => {
             </Box>
           )}
 
-          {role === 'maker' && !rfqContext && flowDirection === 'usdc-usdm' && (
+          {role === 'maker' && flowDirection === 'usdc-usdm' && (
             <Stack spacing={1.25} sx={{ mt: 2 }}>
-              <Typography
-                sx={{
-                  fontSize: '0.64rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  color: theme.custom.textMuted,
-                }}
-              >
-                Counterparty Midnight Keys
-              </Typography>
-              <Stack
-                direction="row"
-                alignItems="center"
-                spacing={1}
-                sx={{
-                  p: 1,
-                  borderRadius: 1,
-                  border: `1px dashed ${theme.custom.borderSubtle}`,
-                  bgcolor: alpha(theme.custom.cardanoBlue, 0.04),
-                }}
-              >
-                <Typography variant="caption" sx={{ color: theme.custom.textSecondary, flex: 1 }}>
-                  Got a key bundle from the counterparty? Paste once to fill both fields.
-                </Typography>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<ContentPasteIcon sx={{ fontSize: 13 }} />}
-                  onClick={() => void onPasteBundle()}
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography
+                  sx={{
+                    fontSize: '0.64rem',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: theme.custom.textMuted,
+                  }}
                 >
-                  Paste bundle
-                </Button>
+                  Counterparty Midnight Keys
+                </Typography>
+                {rfqContext && <BoundBadge reference={rfqContext.rfq.reference} />}
               </Stack>
+              {!rfqContext && (
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  spacing={1}
+                  sx={{
+                    p: 1,
+                    borderRadius: 1,
+                    border: `1px dashed ${theme.custom.borderSubtle}`,
+                    bgcolor: alpha(theme.custom.cardanoBlue, 0.04),
+                  }}
+                >
+                  <Typography variant="caption" sx={{ color: theme.custom.textSecondary, flex: 1 }}>
+                    Got a key bundle from the counterparty? Paste once to fill both fields.
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<ContentPasteIcon sx={{ fontSize: 13 }} />}
+                    onClick={() => void onPasteBundle()}
+                  >
+                    Paste bundle
+                  </Button>
+                </Stack>
+              )}
               <TextField
                 size="small"
                 fullWidth
@@ -733,13 +743,16 @@ export const SwapCard: React.FC = () => {
                 value={counterpartyMidnightCpk}
                 onChange={(e) => onCpkInputChange(e.target.value)}
                 placeholder="mn_shield-cpk_… or bundle cpk:unshielded"
-                error={counterpartyMidnightCpk.trim().length > 0 && !resolvedCounterpartyMidnightCpkBytes}
+                error={!rfqContext && counterpartyMidnightCpk.trim().length > 0 && !resolvedCounterpartyMidnightCpkBytes}
+                disabled={!!rfqContext}
                 helperText={
-                  counterpartyMidnightCpk.trim().length === 0
-                    ? 'Paste either the coin key alone, or the full cpk:unshielded bundle here.'
-                    : resolvedCounterpartyMidnightCpkBytes
-                      ? 'Valid shielded coin key.'
-                      : 'Not a valid bech32m coin key or 64-hex.'
+                  rfqContext
+                    ? `Auto-bound from ${rfqContext.rfq.reference}.`
+                    : counterpartyMidnightCpk.trim().length === 0
+                      ? 'Paste either the coin key alone, or the full cpk:unshielded bundle here.'
+                      : resolvedCounterpartyMidnightCpkBytes
+                        ? 'Valid shielded coin key.'
+                        : 'Not a valid bech32m coin key or 64-hex.'
                 }
               />
               <TextField
@@ -749,13 +762,16 @@ export const SwapCard: React.FC = () => {
                 value={counterpartyMidnightUnshielded}
                 onChange={(e) => onUnshieldedInputChange(e.target.value)}
                 placeholder="mn_addr_… or 64-hex"
-                error={counterpartyMidnightUnshielded.trim().length > 0 && !resolvedCounterpartyMidnightUnshieldedBytes}
+                error={!rfqContext && counterpartyMidnightUnshielded.trim().length > 0 && !resolvedCounterpartyMidnightUnshieldedBytes}
+                disabled={!!rfqContext}
                 helperText={
-                  counterpartyMidnightUnshielded.trim().length === 0
-                    ? 'Payout destination for the USDC when they claim.'
-                    : resolvedCounterpartyMidnightUnshieldedBytes
-                      ? 'Valid unshielded address.'
-                      : 'Not a valid bech32m address or 64-hex.'
+                  rfqContext
+                    ? `${rfqContext.rfq.selectedProviderName ?? 'Counterparty'} will receive the USDC here.`
+                    : counterpartyMidnightUnshielded.trim().length === 0
+                      ? 'Payout destination for the USDC when they claim.'
+                      : resolvedCounterpartyMidnightUnshieldedBytes
+                        ? 'Valid unshielded address.'
+                        : 'Not a valid bech32m address or 64-hex.'
                 }
               />
             </Stack>
@@ -940,80 +956,36 @@ const Row: React.FC<{ k: string; v: string }> = ({ k, v }) => {
   );
 };
 
-const short = (s: string, head = 8, tail = 6): string =>
-  s.length <= head + tail + 2 ? s : `${s.slice(0, head)}…${s.slice(-tail)}`;
-
-const CounterpartyBoundCard: React.FC<{ rfq: Rfq; provider: WalletSnapshot }> = ({ rfq, provider }) => {
+const BoundBadge: React.FC<{ reference: string }> = ({ reference }) => {
   const theme = useTheme();
   return (
     <Box
       sx={{
-        mt: 2,
-        p: 1.5,
-        borderRadius: 1.5,
-        border: `1px solid ${alpha(theme.custom.teal, 0.3)}`,
-        bgcolor: alpha(theme.custom.teal, 0.06),
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 0.5,
+        px: 0.75,
+        py: 0.15,
+        borderRadius: 0.75,
+        border: `1px solid ${alpha(theme.custom.teal, 0.4)}`,
+        bgcolor: alpha(theme.custom.teal, 0.08),
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: '0.56rem',
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        color: theme.custom.teal,
       }}
     >
-      <Stack direction="row" spacing={1} alignItems="center">
-        <Box
-          sx={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            bgcolor: theme.custom.teal,
-            boxShadow: `0 0 8px ${alpha(theme.custom.teal, 0.6)}`,
-          }}
-        />
-        <Typography
-          sx={{
-            flex: 1,
-            fontFamily: 'JetBrains Mono, monospace',
-            fontSize: '0.62rem',
-            letterSpacing: '0.16em',
-            textTransform: 'uppercase',
-            color: theme.custom.teal,
-          }}
-        >
-          Counterparty bound · {rfq.reference}
-        </Typography>
-      </Stack>
-      <Typography
+      <Box
         sx={{
-          mt: 1,
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: '0.78rem',
-          color: theme.custom.textPrimary,
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          bgcolor: theme.custom.teal,
+          boxShadow: `0 0 6px ${alpha(theme.custom.teal, 0.6)}`,
         }}
-      >
-        {rfq.selectedProviderName ?? 'Unknown'} <Box component="span" sx={{ color: theme.custom.textMuted }}>· {rfq.selectedProviderEmail ?? ''}</Box>
-      </Typography>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 1 }}>
-        {provider.cardanoAddress && (
-          <Box sx={{ flex: 1 }}>
-            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: theme.custom.textMuted }}>
-              Their Cardano
-            </Typography>
-            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: theme.custom.textPrimary }}>
-              {short(provider.cardanoAddress, 10, 6)}
-            </Typography>
-          </Box>
-        )}
-        {provider.midnightUnshieldedBech32 && (
-          <Box sx={{ flex: 1 }}>
-            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: theme.custom.textMuted }}>
-              Their Midnight
-            </Typography>
-            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: theme.custom.textPrimary }}>
-              {short(provider.midnightUnshieldedBech32, 10, 6)}
-            </Typography>
-          </Box>
-        )}
-      </Stack>
-      <Typography sx={{ mt: 1.25, fontSize: '0.66rem', color: theme.custom.textMuted, fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.5 }}>
-        Settlement keys come from the accepted quote — no paste needed. Sign the lock and the
-        counterparty is auto-routed in.
-      </Typography>
+      />
+      bound · {reference}
     </Box>
   );
 };

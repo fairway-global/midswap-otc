@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Button, Stack, TextField, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
-import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 
@@ -10,10 +10,12 @@ export const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
-  const { signIn, configured } = useAuth();
+  const { user, signIn, configured } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  if (user) return <Navigate to="/app" replace />;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

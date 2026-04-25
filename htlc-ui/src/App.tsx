@@ -43,7 +43,7 @@ const App: React.FC = () => (
 
               {/* Public — swap surface (kept unauthenticated for legacy share URLs) */}
               <Route path="/app" element={<Home />} />
-              <Route path="/swap" element={<Navigate to="/app" replace />} />
+              <Route path="/swap" element={<LegacyRedirect />} />
               <Route path="/browse" element={<Browse />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/reclaim" element={<Reclaim />} />

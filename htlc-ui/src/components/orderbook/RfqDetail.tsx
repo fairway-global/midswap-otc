@@ -9,13 +9,15 @@
  *       * originator viewing a Submitted/Countered quote → Counter / Reject / Accept
  *       * any other signed-in user → Submit Quote panel
  *       * a quoter viewing the originator's counter on their own thread → Counter
- *   - On status === 'QuoteSelected' AND viewer is originator → navigate to
- *     /swap?rfqId=<id> (one-shot via useRef).
- *   - On status === 'Settling' AND viewer is selectedProvider AND swapHash
- *     present → fetch swap, build legacy share URL, navigate.
+ *   - When status === 'QuoteSelected' or 'Settling', a Settlement panel
+ *     surfaces the accepted terms (Sell / Indicative / Offer), the
+ *     counterparty's receive address, and an explicit "Lock" / "Deposit"
+ *     button. NO auto-redirect to /swap — the originator and LP both stay
+ *     on this page until they click through, so they can verify the deal
+ *     before signing.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Box, Button, Stack, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -109,41 +111,25 @@ export const RfqDetail: React.FC = () => {
     };
   }, [rfq?.status, fetchAll]);
 
-  // Originator redirect: QuoteSelected → /swap?rfqId=…
-  const originatorRedirected = useRef(false);
-  useEffect(() => {
-    if (originatorRedirected.current) return;
-    if (!rfq || !user) return;
-    if (rfq.status === 'QuoteSelected' && rfq.originatorId === user.id) {
-      originatorRedirected.current = true;
-      void navigate(`/swap?rfqId=${rfq.id}`);
-    }
-  }, [rfq, user, navigate]);
+  // Manual settlement actions — replaces previous auto-redirects.
+  // Originator clicks "Lock" → navigate to /swap?rfqId=…
+  // LP clicks "Deposit" → fetch swap, compose share URL, navigate to /app
+  // (so the existing taker reducer hydrates from URL params as before).
+  const onOriginatorLock = useCallback(() => {
+    if (!rfq) return;
+    void navigate(`/swap?rfqId=${rfq.id}`);
+  }, [rfq, navigate]);
 
-  // LP redirect: Settling AND swap_hash present AND viewer is selectedProvider
-  // → fetch swap, compose share URL, navigate.
-  const lpRedirected = useRef(false);
-  useEffect(() => {
-    if (lpRedirected.current) return;
-    if (!rfq || !user) return;
-    if (
-      rfq.status === 'Settling' &&
-      rfq.swapHash &&
-      rfq.selectedProviderId === user.id
-    ) {
-      lpRedirected.current = true;
-      void (async () => {
-        try {
-          const swap = await orchestratorClient.getSwap(rfq.swapHash!);
-          const params = composeShareUrlParams(rfq, swap);
-          void navigate(`/app?${params.toString()}`);
-        } catch (err) {
-          console.warn('[rfq-detail] settlement redirect failed', err);
-          lpRedirected.current = false;
-        }
-      })();
+  const onLpDeposit = useCallback(async () => {
+    if (!rfq?.swapHash) return;
+    try {
+      const swap = await orchestratorClient.getSwap(rfq.swapHash);
+      const params = composeShareUrlParams(rfq, swap);
+      void navigate(`/app?${params.toString()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not load swap row');
     }
-  }, [rfq, user, navigate]);
+  }, [rfq, navigate, toast]);
 
   const onAccept = useCallback(
     async (quote: Quote) => {
@@ -388,42 +374,19 @@ export const RfqDetail: React.FC = () => {
           </Stack>
         </Panel>
 
-        {/* Selected-provider hint when settlement is being prepared */}
+        {/* Settlement panel — visible from QuoteSelected through Settling.
+            Shows the accepted terms, the counterparty's receive address, and
+            a single explicit action (Lock / Deposit) so the user signs only
+            after they've eyeballed the deal. */}
         {(rfq.status === 'QuoteSelected' || rfq.status === 'Settling') && (
-          <Panel>
-            <Box sx={{ p: 3 }}>
-              <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.66rem', letterSpacing: '0.16em', textTransform: 'uppercase', color: theme.custom.bridgeCyan }}>
-                Settlement
-              </Typography>
-              <Typography sx={{ mt: 1, fontFamily: 'JetBrains Mono, monospace', fontSize: '0.84rem', lineHeight: 1.7 }}>
-                {isOriginator
-                  ? 'You are the maker. Open the swap surface, sign the lock — counterparty will follow automatically.'
-                  : isSelectedProvider
-                  ? 'You are the taker. Once the maker locks, your swap surface will open automatically.'
-                  : 'Negotiation closed. Settlement is in progress between the maker and selected counterparty.'}
-              </Typography>
-              {(isOriginator || isSelectedProvider) && rfq.status === 'QuoteSelected' && isOriginator && (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  sx={{ mt: 2 }}
-                  onClick={() => void navigate(`/swap?rfqId=${rfq.id}`)}
-                >
-                  Open swap surface
-                </Button>
-              )}
-              {(isOriginator || isSelectedProvider) && rfq.status === 'Settling' && rfq.swapHash && (
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  sx={{ mt: 2 }}
-                  onClick={() => void navigate(`/swap?rfqId=${rfq.id}${isOriginator ? '' : `&hash=${rfq.swapHash}&role=bob`}`)}
-                >
-                  Resume settlement
-                </Button>
-              )}
-            </Box>
-          </Panel>
+          <SettlementPanel
+            rfq={rfq}
+            quotes={quotes}
+            isOriginator={isOriginator}
+            isSelectedProvider={isSelectedProvider}
+            onLock={onOriginatorLock}
+            onDeposit={onLpDeposit}
+          />
         )}
       </Stack>
 
@@ -489,5 +452,229 @@ const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => {
         {value}
       </Typography>
     </Stack>
+  );
+};
+
+const shortAddr = (s: string, head = 14, tail = 8): string =>
+  s.length <= head + tail + 1 ? s : `${s.slice(0, head)}…${s.slice(-tail)}`;
+
+interface SettlementPanelProps {
+  rfq: Rfq;
+  quotes: Quote[];
+  isOriginator: boolean;
+  isSelectedProvider: boolean;
+  onLock: () => void;
+  onDeposit: () => void;
+}
+
+const SettlementPanel: React.FC<SettlementPanelProps> = ({
+  rfq,
+  quotes,
+  isOriginator,
+  isSelectedProvider,
+  onLock,
+  onDeposit,
+}) => {
+  const theme = useTheme();
+  const sellSymbol = rfq.side === 'sell-usdm' ? 'USDM' : 'USDC';
+  const buySymbol = rfq.side === 'sell-usdm' ? 'USDC' : 'USDM';
+
+  // The accepted offer = the buyAmount on the chosen quote (NOT the indicative).
+  // Falls back to indicative if the quote isn't visible to the viewer (e.g. an
+  // LP browsing someone else's RFQ has limited quote visibility).
+  const acceptedQuote = quotes.find((q) => q.id === rfq.selectedQuoteId);
+  const offerAmount = acceptedQuote?.buyAmount ?? rfq.indicativeBuyAmount;
+
+  // The counterparty's RECEIVE address — what the originator's outgoing tokens
+  // bind to. Forward (sell-usdm): provider's Cardano address. Reverse
+  // (sell-usdc): provider's Midnight unshielded.
+  const provider = rfq.providerWalletSnapshot;
+  const receiveChainLabel = rfq.side === 'sell-usdm' ? 'Cardano' : 'Midnight';
+  const receiverAddress =
+    rfq.side === 'sell-usdm'
+      ? provider?.cardanoAddress
+      : provider?.midnightUnshieldedBech32;
+
+  const swapReady = rfq.status === 'Settling' && !!rfq.swapHash;
+
+  const heading =
+    isOriginator
+      ? swapReady
+        ? 'Settlement in flight'
+        : 'Both parties agreed — your turn to lock'
+      : isSelectedProvider
+        ? swapReady
+          ? 'Maker has locked — your turn to deposit'
+          : 'Awaiting maker to lock first'
+        : 'Settlement in progress between maker and counterparty';
+
+  return (
+    <Panel>
+      <Box sx={{ p: 3 }}>
+        <Typography
+          sx={{
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: '0.66rem',
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color: theme.custom.bridgeCyan,
+          }}
+        >
+          Settlement
+        </Typography>
+        <Typography
+          sx={{
+            mt: 1,
+            fontFamily: 'Inter, sans-serif',
+            fontSize: '1rem',
+            color: theme.custom.textPrimary,
+          }}
+        >
+          {heading}
+        </Typography>
+
+        {/* Accepted terms — three labeled stats so the user can verify before signing. */}
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1.5}
+          sx={{ mt: 2.5 }}
+        >
+          <SettlementStat label="Sell" value={`${rfq.sellAmount} ${sellSymbol}`} />
+          <SettlementStat
+            label="Indicative"
+            value={`${rfq.indicativeBuyAmount} ${buySymbol}`}
+            tone="muted"
+          />
+          <SettlementStat
+            label="Offer (accepted)"
+            value={`${offerAmount} ${buySymbol}`}
+            tone="accent"
+          />
+        </Stack>
+
+        {/* Counterparty's receive address — auto-filled from the snapshot
+            captured at quote-accept time. The originator's lock binds to this. */}
+        {(isOriginator || isSelectedProvider) && receiverAddress && (
+          <Box
+            sx={{
+              mt: 2,
+              p: 1.5,
+              borderRadius: 1.5,
+              border: `1px solid ${theme.custom.borderSubtle}`,
+              bgcolor: '#000',
+            }}
+          >
+            <Typography
+              sx={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.6rem',
+                letterSpacing: '0.16em',
+                textTransform: 'uppercase',
+                color: theme.custom.textMuted,
+              }}
+            >
+              {isOriginator
+                ? `Receiver — counterparty's ${receiveChainLabel} address`
+                : `Your ${receiveChainLabel} address — settlement lands here`}
+            </Typography>
+            <Typography
+              sx={{
+                mt: 0.5,
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.78rem',
+                color: theme.custom.textPrimary,
+                wordBreak: 'break-all',
+              }}
+            >
+              {receiverAddress}
+            </Typography>
+          </Box>
+        )}
+
+        {/* Action button. Lock for originator; Deposit for LP (only after
+            maker locks and the swap row exists). Other viewers see no action. */}
+        <Stack direction="row" spacing={1} sx={{ mt: 2, alignItems: 'center' }}>
+          {isOriginator && rfq.status === 'QuoteSelected' && (
+            <Button variant="contained" color="primary" onClick={onLock}>
+              Lock {sellSymbol}
+            </Button>
+          )}
+          {isOriginator && rfq.status === 'Settling' && (
+            <Button variant="outlined" color="primary" onClick={onLock}>
+              Resume locking
+            </Button>
+          )}
+          {isSelectedProvider && rfq.status === 'QuoteSelected' && (
+            <Button variant="outlined" disabled>
+              Awaiting maker…
+            </Button>
+          )}
+          {isSelectedProvider && swapReady && (
+            <Button variant="contained" color="primary" onClick={() => void onDeposit()}>
+              Deposit {buySymbol}
+            </Button>
+          )}
+
+          <Typography
+            sx={{
+              ml: 'auto',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: '0.62rem',
+              color: theme.custom.textMuted,
+            }}
+          >
+            {isOriginator
+              ? 'You sign on Midnight + Cardano · counterparty auto-routes in'
+              : isSelectedProvider
+                ? 'You sign on Midnight + Cardano · settlement is atomic'
+                : ''}
+          </Typography>
+        </Stack>
+      </Box>
+    </Panel>
+  );
+};
+
+const SettlementStat: React.FC<{
+  label: string;
+  value: string;
+  tone?: 'muted' | 'accent';
+}> = ({ label, value, tone }) => {
+  const theme = useTheme();
+  const accent = tone === 'accent';
+  const muted = tone === 'muted';
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        p: 1.5,
+        borderRadius: 1.5,
+        border: `1px solid ${accent ? alpha(theme.custom.teal, 0.3) : theme.custom.borderSubtle}`,
+        bgcolor: accent ? alpha(theme.custom.teal, 0.06) : '#000',
+      }}
+    >
+      <Typography
+        sx={{
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '0.6rem',
+          letterSpacing: '0.16em',
+          textTransform: 'uppercase',
+          color: accent ? theme.custom.teal : theme.custom.textMuted,
+        }}
+      >
+        {label}
+      </Typography>
+      <Typography
+        sx={{
+          mt: 0.5,
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '1rem',
+          fontWeight: 600,
+          color: muted ? theme.custom.textMuted : theme.custom.textPrimary,
+        }}
+      >
+        {value}
+      </Typography>
+    </Box>
   );
 };

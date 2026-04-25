@@ -85,7 +85,12 @@ export const OrderBook: React.FC = () => {
 
   const filtered = useMemo(() => {
     if (tab === 'open') {
-      return rfqs.filter((r) => ['OpenForQuotes', 'Negotiating', 'QuoteSelected'].includes(r.status));
+      // Include 'Settling' so the LP doesn't lose sight of an order the
+      // moment the originator locks. The row stays visible and routes the
+      // LP to RfqDetail where the auto-redirect to /app picks them up.
+      return rfqs.filter((r) =>
+        ['OpenForQuotes', 'Negotiating', 'QuoteSelected', 'Settling'].includes(r.status),
+      );
     }
     return rfqs;
   }, [rfqs, tab]);
@@ -149,7 +154,7 @@ export const OrderBook: React.FC = () => {
                   <Box component="th">Reference</Box>
                   <Box component="th">Pair</Box>
                   <Box component="th">Side</Box>
-                  <Box component="th" sx={{ textAlign: 'right' }}>Sell</Box>
+                  <Box component="th" sx={{ textAlign: 'right' }}>Sell Offer</Box>
                   <Box component="th" sx={{ textAlign: 'right' }}>Indicative</Box>
                   <Box component="th">Originator</Box>
                   <Box component="th">Status</Box>
@@ -173,21 +178,15 @@ export const OrderBook: React.FC = () => {
                           {r.reference}
                         </Typography>
                         {user?.id === r.originatorId && (
-                          <Box
-                            sx={{
-                              fontSize: '0.55rem',
-                              letterSpacing: '0.12em',
-                              textTransform: 'uppercase',
-                              color: theme.custom.teal,
-                              border: `1px solid ${alpha(theme.custom.teal, 0.4)}`,
-                              borderRadius: 0.5,
-                              px: 0.5,
-                              py: 0.1,
-                            }}
-                          >
-                            yours
-                          </Box>
+                          <RowPill color={theme.custom.teal} label="yours" />
                         )}
+                        {user?.id === r.selectedProviderId &&
+                          (r.status === 'Settling' || r.status === 'QuoteSelected') && (
+                            <RowPill
+                              color={theme.custom.bridgeCyan}
+                              label={r.status === 'Settling' ? 'resume' : 'awaiting maker'}
+                            />
+                          )}
                       </Stack>
                     </Box>
                     <Box component="td"><ChainPair side={r.side} /></Box>
@@ -251,6 +250,24 @@ const tableSx = (theme: Theme) => ({
   },
   'tbody tr:last-of-type td': { borderBottom: 'none' },
 });
+
+const RowPill: React.FC<{ color: string; label: string }> = ({ color, label }) => (
+  <Box
+    sx={{
+      fontSize: '0.55rem',
+      letterSpacing: '0.12em',
+      textTransform: 'uppercase',
+      color,
+      border: `1px solid ${alpha(color, 0.4)}`,
+      borderRadius: 0.5,
+      px: 0.5,
+      py: 0.1,
+      fontFamily: 'JetBrains Mono, monospace',
+    }}
+  >
+    {label}
+  </Box>
+);
 
 const EmptyRow: React.FC<{ text: string }> = ({ text }) => {
   const theme = useTheme();

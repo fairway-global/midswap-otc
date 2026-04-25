@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Button, Stack, TextField, Typography } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 
@@ -9,12 +9,14 @@ export const Signup: React.FC = () => {
   const theme = useTheme();
   const navigate = useNavigate();
   const toast = useToast();
-  const { signUp, configured } = useAuth();
+  const { user, signUp, configured } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [institutionName, setInstitutionName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  if (user) return <Navigate to="/app" replace />;
 
   const valid = email.includes('@') && password.length >= 8 && fullName && institutionName;
 
