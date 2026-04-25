@@ -164,7 +164,6 @@ export const WalletMenu: React.FC = () => {
               <Button
                 size="small"
                 variant="outlined"
-                startIcon={<ShareIcon sx={{ fontSize: 12 }} />}
                 onClick={() => void copy(formatKeyBundle(mnCpk!, mnAddr!), 'Midnight key bundle')}
                 sx={{
                   alignSelf: 'flex-start',
