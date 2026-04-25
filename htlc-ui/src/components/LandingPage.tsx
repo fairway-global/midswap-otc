@@ -19,7 +19,7 @@ const MARQUEE_LOGOS: Array<{type:'img'|'text', src?:string, alt?:string, label?:
   {type:'img', src:'/marquee-midnight-full.png', alt:'Midnight'},
   {type:'text', label:'ZK COMPLIANCE'},
 ];
-const PHRASES = ['Zero Counterparty Risk.','Self-Custody Execution.','Atomic Settlement.','Full Compliance'];
+const PHRASES = ['No Counterparty Risk','Self-Custody Execution','Atomic Settlement','Full Compliance'];
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
@@ -118,7 +118,7 @@ export const LandingPage: React.FC = () => {
         </div>
         <div className="hero-content"><div className="hero-text-block">
           <h1 className="hero-title" data-animate="fade-up">
-            <span className="hero-rotating-wrapper"><span className="hero-rotating-text" ref={rotRef}>Zero Counterparty Risk.</span></span>
+            <span className="hero-rotating-wrapper"><span className="hero-rotating-text" ref={rotRef}>No Counterparty Risk</span></span>
             <span className="hero-static-text">
               The OTC Rail for <span className="accent-text">Digital Assets.</span>
             </span>
