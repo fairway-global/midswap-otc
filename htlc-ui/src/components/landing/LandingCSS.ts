@@ -85,8 +85,8 @@ const LANDING_CSS = `
 .klp .hero-text-block{max-width:680px;margin-left:auto;padding-right:0}
 @media(min-width:640px){.klp .hero-text-block{padding-right:24px}}
 .klp .hero-title{font-family:var(--font-sans);font-weight:300;font-size:clamp(2.2rem,5vw,4.2rem);line-height:1.1;letter-spacing:-.02em}
-.klp .hero-rotating-wrapper{display:block;height:1.2em;overflow:hidden;perspective:600px}
-.klp .hero-rotating-text{display:inline-block;color:var(--white);transform-origin:center bottom;transition:all .4s var(--ease-out)}
+.klp .hero-rotating-wrapper{display:block;height:1.2em;overflow:hidden;perspective:600px;width:100%;text-align:left}
+.klp .hero-rotating-text{display:inline-block;color:var(--white);transform-origin:left bottom;transition:all .4s var(--ease-out);width:100%}
 .klp .hero-static-text{display:block;color:var(--white)}
 .klp .hero-subtitle{margin-top:32px;max-width:520px;font-size:15px;line-height:1.7;color:var(--text)}
 .klp .hero-actions{margin-top:28px;display:flex;align-items:center;gap:24px}
