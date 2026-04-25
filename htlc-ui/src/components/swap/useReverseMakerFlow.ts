@@ -277,6 +277,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         }
         finishBlockfrost({
           hashHex: state.hashHex,
+          lockTxHash: dbSwap.cardanoLockTx,
           amountUsdm: utxoVisible.assets[cardano.usdmPolicy.unit] ?? state.usdmAmount,
           amountLovelace: utxoVisible.assets.lovelace ?? 2_000_000n,
           deadlineMs: BigInt(dbSwap.cardanoDeadlineMs),

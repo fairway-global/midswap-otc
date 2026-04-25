@@ -176,7 +176,7 @@ export const Login: React.FC = () => {
                 mb: 0.75,
               }}
             >
-              Work email
+              Email
             </Typography>
             <TextField
               id="login-email"
@@ -242,7 +242,7 @@ export const Login: React.FC = () => {
                 '&:hover': { color: theme.custom.bridgeCyan },
               }}
             >
-              Request access →
+              Sign up →
             </Box>
           </Typography>
         </Stack>

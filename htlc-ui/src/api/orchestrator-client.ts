@@ -333,10 +333,9 @@ export interface CounterQuoteBody {
 }
 
 export interface SignupBody {
+  username: string;
   email: string;
   password: string;
-  fullName: string;
-  institutionName: string;
 }
 
 export const otcApi = {

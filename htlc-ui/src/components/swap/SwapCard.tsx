@@ -137,6 +137,7 @@ export const SwapCard: React.FC = () => {
   // Shared UI state.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [swapUiHidden, setSwapUiHidden] = useState(false);
 
   // Maker-only local form.
   const [usdmAmount, setUsdmAmount] = useState('1');
@@ -258,10 +259,10 @@ export const SwapCard: React.FC = () => {
         : revTaker.state;
 
   useEffect(() => {
-    if (activeState.kind !== 'idle' && activeState.kind !== 'error') {
+    if (!swapUiHidden && activeState.kind !== 'idle' && activeState.kind !== 'error') {
       setModalOpen(true);
     }
-  }, [activeState.kind]);
+  }, [activeState.kind, swapUiHidden]);
 
   // Taker URL parsing — forward or reverse depending on the `direction` param.
   const fwdUrl = useMemo(() => {
@@ -403,6 +404,7 @@ export const SwapCard: React.FC = () => {
 
   const onStartOver = useCallback(() => {
     setModalOpen(false);
+    setSwapUiHidden(false);
     setSearchParams(new URLSearchParams());
     fwdMaker.reset();
     fwdTaker.reset();
@@ -494,11 +496,11 @@ export const SwapCard: React.FC = () => {
   // Restore notice (either maker hook may have pending state).
   const restoreNotice =
     role === 'maker' ? (flowDirection === 'usdm-usdc' ? fwdMaker.restoreNotice : revMaker.restoreNotice) : undefined;
-  const onForgetPending = useCallback(() => {
-    if (flowDirection === 'usdm-usdc') fwdMaker.forgetPending();
-    else revMaker.forgetPending();
-    onStartOver();
-  }, [flowDirection, fwdMaker, revMaker, onStartOver]);
+  const onHideSwapUi = useCallback(() => {
+    setModalOpen(false);
+    setSwapUiHidden(true);
+    toast.info('Settlement hidden on this page. Reopen it here or recover from Order Book detail.');
+  }, [toast]);
 
   // Smart-paste: accept a `cpk:unshielded` bundle typed/pasted into either
   // counterparty field, and split it into both fields transparently.
@@ -828,12 +830,44 @@ export const SwapCard: React.FC = () => {
               severity="info"
               sx={{ mt: 2 }}
               action={
-                <Button size="small" color="inherit" onClick={onForgetPending}>
-                  Discard
+                <Button size="small" color="inherit" onClick={onHideSwapUi}>
+                  Hide
                 </Button>
               }
             >
               {restoreNotice}
+            </Alert>
+          )}
+
+          {swapUiHidden && (
+            <Alert
+              severity="info"
+              sx={{ mt: 2 }}
+              action={
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    size="small"
+                    color="inherit"
+                    onClick={() => {
+                      setSwapUiHidden(false);
+                      setModalOpen(true);
+                    }}
+                  >
+                    Resume here
+                  </Button>
+                  {rfqIdFromUrl && (
+                    <Button
+                      size="small"
+                      color="inherit"
+                      onClick={() => void navigate(`/rfq/${rfqIdFromUrl}`)}
+                    >
+                      Order detail
+                    </Button>
+                  )}
+                </Stack>
+              }
+            >
+              Settlement is hidden on this screen. You can recover it from the order detail page at any time.
             </Alert>
           )}
 

@@ -28,12 +28,7 @@ interface AuthValue {
   readonly loading: boolean;
   readonly configured: boolean;
   signIn(email: string, password: string): Promise<void>;
-  signUp(
-    email: string,
-    password: string,
-    fullName: string,
-    institutionName: string,
-  ): Promise<void>;
+  signUp(username: string, email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
 }
 
@@ -100,19 +95,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signUp = useCallback(
-    async (
-      email: string,
-      password: string,
-      fullName: string,
-      institutionName: string,
-    ): Promise<void> => {
+    async (username: string, email: string, password: string): Promise<void> => {
       if (!supabaseConfigured) {
         throw new Error('Supabase not configured. Set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY.');
       }
       // Server-side signup auto-confirms the email (admin.createUser w/
       // email_confirm:true). No inbox round-trip — we sign the user in
       // immediately after to land them in a session.
-      await otcApi.signup({ email, password, fullName, institutionName });
+      await otcApi.signup({ username, email, password });
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw new Error(error.message);
     },

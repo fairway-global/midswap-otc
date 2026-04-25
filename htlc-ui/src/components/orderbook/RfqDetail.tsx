@@ -131,6 +131,22 @@ export const RfqDetail: React.FC = () => {
     }
   }, [rfq, navigate, toast]);
 
+  const canRecoverSettlement =
+    !!rfq &&
+    ((isOriginator && (rfq.status === 'QuoteSelected' || rfq.status === 'Settling')) ||
+      (isSelectedProvider && rfq.status === 'Settling' && !!rfq.swapHash));
+
+  const onRecoverSettlement = useCallback(() => {
+    if (!rfq) return;
+    if (isOriginator) {
+      onOriginatorLock();
+      return;
+    }
+    if (isSelectedProvider && rfq.swapHash) {
+      void onLpDeposit();
+    }
+  }, [rfq, isOriginator, isSelectedProvider, onOriginatorLock, onLpDeposit]);
+
   const onAccept = useCallback(
     async (quote: Quote) => {
       if (!rfq) return;
@@ -233,6 +249,11 @@ export const RfqDetail: React.FC = () => {
               </Typography>
               <RfqStatusChip status={rfq.status} />
               <Box sx={{ flex: 1 }} />
+              {canRecoverSettlement && (
+                <Button size="small" variant="outlined" color="primary" onClick={onRecoverSettlement}>
+                  Resume settlement
+                </Button>
+              )}
               {isOriginator && ['OpenForQuotes', 'Negotiating'].includes(rfq.status) && (
                 <Button
                   size="small"

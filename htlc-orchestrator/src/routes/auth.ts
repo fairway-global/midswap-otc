@@ -5,24 +5,21 @@ import type { UserWalletInput } from '../types.js';
 const isString = (v: unknown): v is string => typeof v === 'string';
 
 interface SignupBody {
+  username: string;
   email: string;
   password: string;
-  fullName: string;
-  institutionName: string;
 }
 
 const validateSignup = (body: unknown): SignupBody | string => {
   if (!body || typeof body !== 'object') return 'body must be an object';
   const b = body as Record<string, unknown>;
+  if (!isString(b.username) || b.username.trim().length === 0) return 'username required';
   if (!isString(b.email) || !b.email.includes('@')) return 'email required';
   if (!isString(b.password) || b.password.length < 8) return 'password must be at least 8 characters';
-  if (!isString(b.fullName) || b.fullName.length === 0) return 'fullName required';
-  if (!isString(b.institutionName)) return 'institutionName required';
   return {
+    username: b.username.trim(),
     email: b.email,
     password: b.password,
-    fullName: b.fullName,
-    institutionName: b.institutionName,
   };
 };
 
@@ -70,8 +67,8 @@ export const authRoutes =
           password: parsed.password,
           email_confirm: true,
           user_metadata: {
-            full_name: parsed.fullName,
-            institution_name: parsed.institutionName,
+            full_name: parsed.username,
+            institution_name: null,
           },
         });
         if (error) {
@@ -81,8 +78,8 @@ export const authRoutes =
         const otcUser = store.getOrCreateUserBySupabaseId(
           data.user!.id,
           parsed.email,
-          parsed.fullName,
-          parsed.institutionName,
+          parsed.username,
+          null,
         );
         return reply.code(201).send({ user: otcUser });
       } catch (err) {

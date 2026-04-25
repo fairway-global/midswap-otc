@@ -10,22 +10,21 @@ export const Signup: React.FC = () => {
   const navigate = useNavigate();
   const toast = useToast();
   const { user, signUp, configured } = useAuth();
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [institutionName, setInstitutionName] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   if (user) return <Navigate to="/app" replace />;
 
-  const valid = email.includes('@') && password.length >= 8 && fullName && institutionName;
+  const valid = username.trim().length > 0 && email.includes('@') && password.length >= 8;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid || submitting) return;
     setSubmitting(true);
     try {
-      await signUp(email, password, fullName, institutionName);
+      await signUp(username.trim(), email, password);
       toast.success('Account created');
       navigate('/orderbook', { replace: true });
     } catch (err) {
@@ -69,8 +68,8 @@ export const Signup: React.FC = () => {
             lineHeight: 1.6,
           }}
         >
-          Roles are per-order — anyone in the network can post, quote, accept, or settle. Your
-          institutional name is shown on the order book to counterparties.
+          Roles are per-order — anyone in the network can post, quote, accept, or settle.
+          Your user name is shown on the order book to counterparties.
         </Typography>
 
         {!configured && (
@@ -90,27 +89,17 @@ export const Signup: React.FC = () => {
         )}
 
         <Stack spacing={2} sx={{ mt: 3 }}>
-          <Field label="Full name" id="signup-name">
+          <Field label="Username" id="signup-username">
             <TextField
-              id="signup-name"
+              id="signup-username"
               fullWidth
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="Mei Tanaka"
-              autoComplete="name"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="anon"
+              autoComplete="username"
             />
           </Field>
-          <Field label="Institution" id="signup-inst">
-            <TextField
-              id="signup-inst"
-              fullWidth
-              value={institutionName}
-              onChange={(e) => setInstitutionName(e.target.value)}
-              placeholder="Acme Capital"
-              autoComplete="organization"
-            />
-          </Field>
-          <Field label="Work email" id="signup-email">
+          <Field label="Email" id="signup-email">
             <TextField
               id="signup-email"
               fullWidth
