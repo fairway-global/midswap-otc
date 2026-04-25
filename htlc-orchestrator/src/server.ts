@@ -9,7 +9,10 @@ import {
 } from './cardano-watcher.js';
 import { openDatabase, openOtcStore, openSwapStore } from './db.js';
 import { resolveWatcherConfig, startMidnightWatcher, type MidnightWatcher } from './midnight-watcher.js';
+import { activityRoutes } from './routes/activity.js';
 import { authRoutes } from './routes/auth.js';
+import { quotesRoutes } from './routes/quotes.js';
+import { rfqsRoutes } from './routes/rfqs.js';
 import { swapsRoutes } from './routes/swaps.js';
 import {
   resolveStuckAlerterConfig,
@@ -57,6 +60,9 @@ app.get('/health', async () => ({ ok: true, db: DB_PATH }));
 
 await app.register(swapsRoutes(store), { prefix: '/api' });
 await app.register(authRoutes(otcStore), { prefix: '/api' });
+await app.register(rfqsRoutes(otcStore), { prefix: '/api' });
+await app.register(quotesRoutes(otcStore), { prefix: '/api' });
+await app.register(activityRoutes(otcStore), { prefix: '/api' });
 
 let midnightWatcher: MidnightWatcher | null = null;
 const midnightWatcherConfig = resolveWatcherConfig(app.log);

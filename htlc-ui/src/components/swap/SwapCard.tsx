@@ -51,6 +51,8 @@ import { limits } from '../../config/limits';
 import { AsyncButton } from '../AsyncButton';
 import { decodeShieldedCoinPublicKey, decodeUnshieldedAddress } from '../../api/key-encoding';
 import { parseKeyBundle } from './keyBundle';
+import { otcApi, type Rfq, type WalletSnapshot } from '../../api/orchestrator-client';
+import { rfqAmounts } from '../../api/swap-bridge';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -148,6 +150,57 @@ export const SwapCard: React.FC = () => {
   // Reverse-maker counterparty: Midnight cpk + unshielded address
   const [counterpartyMidnightCpk, setCounterpartyMidnightCpk] = useState('');
   const [counterpartyMidnightUnshielded, setCounterpartyMidnightUnshielded] = useState('');
+
+  // OTC bridge: when ?rfqId is set on the URL and there's no ?hash, the
+  // originator is being routed in from RfqDetail to drive the maker side
+  // of an accepted order. Fetch the RFQ and hydrate amounts + counterparty
+  // from the wallet snapshot taken at quote-accept time. Manual
+  // counterparty inputs are suppressed in this mode (CounterpartyBoundCard
+  // shown instead) and `rfqId` is propagated through createSwap.
+  const rfqIdFromUrl = searchParams.get('rfqId');
+  const [rfqContext, setRfqContext] = useState<{ rfq: Rfq; provider: WalletSnapshot } | null>(null);
+  const rfqHydratedRef = React.useRef(false);
+  useEffect(() => {
+    if (!rfqIdFromUrl || hashInUrl) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await otcApi.getRfq(rfqIdFromUrl);
+        if (cancelled) return;
+        if (!r.providerWalletSnapshot) {
+          toast.warning('Order is not ready for settlement yet — counterparty wallet missing.');
+          return;
+        }
+        setRfqContext({ rfq: r, provider: r.providerWalletSnapshot });
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : 'Could not load order');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rfqIdFromUrl, hashInUrl, toast]);
+
+  // One-shot hydration: when rfqContext arrives, set direction + amounts +
+  // counterparty fields. Guarded by useRef so the user can still hand-edit.
+  useEffect(() => {
+    if (!rfqContext || rfqHydratedRef.current) return;
+    rfqHydratedRef.current = true;
+    const { direction, usdmAmount: u, usdcAmount: c } = rfqAmounts(rfqContext.rfq);
+    setFlowDirection(direction);
+    setUsdmAmount(u);
+    setUsdcAmount(c);
+    if (direction === 'usdm-usdc') {
+      // Forward — maker locks USDM on Cardano against taker's PKH. The
+      // counterparty's snapshot must have cardano fields (validated server-
+      // side at quote time), but the type is partial so we coerce.
+      setCounterpartyCardano(rfqContext.provider.cardanoAddress ?? '');
+    } else {
+      // Reverse — maker deposits USDC on Midnight bound to taker's keys.
+      setCounterpartyMidnightCpk(rfqContext.provider.midnightCpkBech32 ?? '');
+      setCounterpartyMidnightUnshielded(rfqContext.provider.midnightUnshieldedBech32 ?? '');
+    }
+  }, [rfqContext]);
   const resolvedCounterpartyMidnightCpkBytes = useMemo(
     () => resolveMidnightCpk(counterpartyMidnightCpk, networkId),
     [counterpartyMidnightCpk, networkId],
@@ -262,6 +315,7 @@ export const SwapCard: React.FC = () => {
           usdcAmount: usdc,
           deadlineMin: min,
           counterpartyPkh: resolvedCounterpartyPkh,
+          rfqId: rfqContext?.rfq.id,
         });
       } else {
         if (!resolvedCounterpartyMidnightCpkBytes) {
@@ -277,6 +331,7 @@ export const SwapCard: React.FC = () => {
           deadlineMin: min,
           counterpartyCpkBytes: resolvedCounterpartyMidnightCpkBytes,
           counterpartyUnshieldedBytes: resolvedCounterpartyMidnightUnshieldedBytes,
+          rfqId: rfqContext?.rfq.id,
         });
       }
     } catch (e) {
@@ -290,6 +345,7 @@ export const SwapCard: React.FC = () => {
     resolvedCounterpartyPkh,
     resolvedCounterpartyMidnightCpkBytes,
     resolvedCounterpartyMidnightUnshieldedBytes,
+    rfqContext,
     fwdMaker,
     revMaker,
     toast,
@@ -588,8 +644,13 @@ export const SwapCard: React.FC = () => {
             </Tooltip>
           </Box>
 
-          {/* Counterparty input — differs by direction */}
-          {role === 'maker' && flowDirection === 'usdm-usdc' && (
+          {/* Counterparty input — differs by direction. When the maker arrived
+              via /swap?rfqId=… the keys come from the RFQ snapshot, so the
+              manual inputs are replaced with a bound badge. */}
+          {role === 'maker' && rfqContext && (
+            <CounterpartyBoundCard rfq={rfqContext.rfq} provider={rfqContext.provider} />
+          )}
+          {role === 'maker' && !rfqContext && flowDirection === 'usdm-usdc' && (
             <Box sx={{ mt: 2 }}>
               <Typography
                 sx={{
@@ -629,7 +690,7 @@ export const SwapCard: React.FC = () => {
             </Box>
           )}
 
-          {role === 'maker' && flowDirection === 'usdc-usdm' && (
+          {role === 'maker' && !rfqContext && flowDirection === 'usdc-usdm' && (
             <Stack spacing={1.25} sx={{ mt: 2 }}>
               <Typography
                 sx={{
@@ -748,29 +809,15 @@ export const SwapCard: React.FC = () => {
           }}
         >
           <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
-            Need USDC?
+            Need test tokens?
           </Typography>
           <Link
             component="button"
             underline="hover"
-            onClick={() => navigate('/mint')}
+            onClick={() => navigate('/faucet')}
             sx={{ fontWeight: 500, fontSize: 'inherit' }}
           >
-            Mint on Midnight
-          </Link>
-          <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
-            ·
-          </Typography>
-          <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
-            Need USDM?
-          </Typography>
-          <Link
-            component="button"
-            underline="hover"
-            onClick={() => navigate('/mint-usdm')}
-            sx={{ fontWeight: 500, fontSize: 'inherit' }}
-          >
-            Mint on Cardano
+            Open faucet
           </Link>
           <Typography variant="caption" sx={{ color: 'inherit', fontSize: 'inherit' }}>
             ·
@@ -890,5 +937,83 @@ const Row: React.FC<{ k: string; v: string }> = ({ k, v }) => {
         {v}
       </Typography>
     </Stack>
+  );
+};
+
+const short = (s: string, head = 8, tail = 6): string =>
+  s.length <= head + tail + 2 ? s : `${s.slice(0, head)}…${s.slice(-tail)}`;
+
+const CounterpartyBoundCard: React.FC<{ rfq: Rfq; provider: WalletSnapshot }> = ({ rfq, provider }) => {
+  const theme = useTheme();
+  return (
+    <Box
+      sx={{
+        mt: 2,
+        p: 1.5,
+        borderRadius: 1.5,
+        border: `1px solid ${alpha(theme.custom.teal, 0.3)}`,
+        bgcolor: alpha(theme.custom.teal, 0.06),
+      }}
+    >
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Box
+          sx={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            bgcolor: theme.custom.teal,
+            boxShadow: `0 0 8px ${alpha(theme.custom.teal, 0.6)}`,
+          }}
+        />
+        <Typography
+          sx={{
+            flex: 1,
+            fontFamily: 'JetBrains Mono, monospace',
+            fontSize: '0.62rem',
+            letterSpacing: '0.16em',
+            textTransform: 'uppercase',
+            color: theme.custom.teal,
+          }}
+        >
+          Counterparty bound · {rfq.reference}
+        </Typography>
+      </Stack>
+      <Typography
+        sx={{
+          mt: 1,
+          fontFamily: 'JetBrains Mono, monospace',
+          fontSize: '0.78rem',
+          color: theme.custom.textPrimary,
+        }}
+      >
+        {rfq.selectedProviderName ?? 'Unknown'} <Box component="span" sx={{ color: theme.custom.textMuted }}>· {rfq.selectedProviderEmail ?? ''}</Box>
+      </Typography>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 1 }}>
+        {provider.cardanoAddress && (
+          <Box sx={{ flex: 1 }}>
+            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: theme.custom.textMuted }}>
+              Their Cardano
+            </Typography>
+            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: theme.custom.textPrimary }}>
+              {short(provider.cardanoAddress, 10, 6)}
+            </Typography>
+          </Box>
+        )}
+        {provider.midnightUnshieldedBech32 && (
+          <Box sx={{ flex: 1 }}>
+            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.58rem', letterSpacing: '0.12em', textTransform: 'uppercase', color: theme.custom.textMuted }}>
+              Their Midnight
+            </Typography>
+            <Typography sx={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: theme.custom.textPrimary }}>
+              {short(provider.midnightUnshieldedBech32, 10, 6)}
+            </Typography>
+          </Box>
+        )}
+      </Stack>
+      <Typography sx={{ mt: 1.25, fontSize: '0.66rem', color: theme.custom.textMuted, fontFamily: 'JetBrains Mono, monospace', lineHeight: 1.5 }}>
+        Settlement keys come from the accepted quote — no paste needed. Sign the lock and the
+        counterparty is auto-routed in.
+      </Typography>
+    </Box>
   );
 };

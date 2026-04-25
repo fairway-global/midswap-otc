@@ -109,20 +109,20 @@ export const HowTo: React.FC = () => {
               <Link href="https://docs.cardano.org/cardano-testnets/tools/faucet" target="_blank" rel="noopener">
                 Cardano preprod faucet
               </Link>
-              . For USDM on Cardano use the{' '}
-              <RouterLink to="/mint-usdm" style={{ color: theme.custom.cardanoBlue }}>
-                Mint USDM
+              . For test USDM on Cardano use the{' '}
+              <RouterLink to="/faucet?token=USDM" style={{ color: theme.custom.teal }}>
+                Faucet
               </RouterLink>{' '}
-              page.
+              .
             </Typography>
           </ListItem>
           <ListItem sx={{ px: 0 }}>
             <Typography variant="body2">
               <strong>For takers:</strong> native USDC in your Midnight wallet before starting. Use the{' '}
-              <RouterLink to="/mint" style={{ color: theme.custom.cardanoBlue }}>
-                Mint USDC
+              <RouterLink to="/faucet?token=USDC" style={{ color: theme.custom.teal }}>
+                Faucet
               </RouterLink>{' '}
-              page — one signature is enough.
+              — one signature is enough.
             </Typography>
           </ListItem>
         </List>

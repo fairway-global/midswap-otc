@@ -170,6 +170,29 @@ export interface UserWalletInput {
   cardanoAddress: string;
 }
 
+/**
+ * A per-deal wallet snapshot — captured at the moment a quote is submitted /
+ * countered / an RFQ is created. Only the chain the party will RECEIVE on
+ * needs to be present; the SEND-side wallet is captured later from the
+ * connected session at lock/deposit time, by the existing reducers.
+ *
+ * On `sell-usdm` (forward) the counterparty receives USDM on Cardano →
+ * cardano fields required. On `sell-usdc` (reverse) the counterparty
+ * receives USDC on Midnight → midnight fields required.
+ *
+ * Shape is a strict subset of UserWalletInput so the existing SwapCard
+ * hydration (which keys off direction) reads the right fields without
+ * branching on snapshot completeness.
+ */
+export interface WalletSnapshot {
+  midnightCpkBytes?: string;
+  midnightUnshieldedBytes?: string;
+  midnightCpkBech32?: string;
+  midnightUnshieldedBech32?: string;
+  cardanoPkh?: string;
+  cardanoAddress?: string;
+}
+
 export interface Rfq {
   id: string;
   reference: string;               // human-readable, e.g. "RFQ-0001"
@@ -186,10 +209,13 @@ export interface Rfq {
   selectedProviderEmail: string | null;
   acceptedPrice: string | null;
   swapHash: string | null;         // ← bridge link to swaps.hash
-  // Snapshots taken at quote-accept time so post-accept wallet rebinds
-  // can't shift the contract.
-  originatorWalletSnapshot: UserWallet | null;
-  providerWalletSnapshot: UserWallet | null;
+  // Receive-wallet snapshots — frozen at quote-accept time. Only the chain
+  // the party receives on is populated; the send-side wallet is captured
+  // later from the connected session at lock/deposit (existing reducer
+  // behavior). originator_wallet_snapshot stays null in the new model
+  // because the originator commits at lock time, not at RFQ-create.
+  originatorWalletSnapshot: WalletSnapshot | null;
+  providerWalletSnapshot: WalletSnapshot | null;
   createdAt: number;
   updatedAt: number;
   expiresAt: number;
@@ -218,6 +244,13 @@ export interface Quote {
   // No submitted_by_role — derived at read time from rfq.originatorId.
   submittedByUserId: string;
   submittedByName: string;
+  /**
+   * The quoter's receive-side wallet at the moment this quote was sent.
+   * On accept, this is copied to rfq.providerWalletSnapshot and used by the
+   * originator's lock/deposit. Means the quoter has freedom to use any
+   * wallet per deal — it's bound at submit, not at signup.
+   */
+  walletSnapshot: WalletSnapshot | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -227,6 +260,7 @@ export interface SubmitQuoteInput {
   providerId: string;
   price: string;
   buyAmount: string;
+  walletSnapshot: WalletSnapshot;
   note?: string;
 }
 
@@ -236,6 +270,7 @@ export interface CounterQuoteInput {
   actorId: string;
   price: string;
   buyAmount: string;
+  walletSnapshot: WalletSnapshot;
   note?: string;
 }
 

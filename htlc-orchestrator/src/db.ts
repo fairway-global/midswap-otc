@@ -22,6 +22,7 @@ import type {
   SwapStatus,
   UserWallet,
   UserWalletInput,
+  WalletSnapshot,
 } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -477,6 +478,8 @@ interface QuoteRow {
   note: string | null;
   submitted_by_user_id: string;
   submitted_by_name: string;
+  /** JSON-encoded WalletSnapshot, captured at submit/counter time. */
+  quoter_wallet_snapshot: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -554,9 +557,71 @@ const rowToQuote = (row: QuoteRow): Quote => ({
   note: row.note,
   submittedByUserId: row.submitted_by_user_id,
   submittedByName: row.submitted_by_name,
+  walletSnapshot: row.quoter_wallet_snapshot
+    ? (JSON.parse(row.quoter_wallet_snapshot) as WalletSnapshot)
+    : null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
+
+/**
+ * Validate a per-deal wallet snapshot for the chain the party is RECEIVING
+ * on. `receiveChain` follows from rfq.side mirrored by role:
+ *   originator on sell-usdm: receives USDC on Midnight
+ *   originator on sell-usdc: receives USDM on Cardano
+ *   counterparty on sell-usdm: receives USDM on Cardano
+ *   counterparty on sell-usdc: receives USDC on Midnight
+ */
+const HEX64 = /^[0-9a-f]{64}$/;
+const HEX56 = /^[0-9a-f]{56}$/;
+export const validateWalletSnapshot = (
+  snap: WalletSnapshot,
+  receiveChain: 'midnight' | 'cardano',
+): WalletSnapshot => {
+  const out: WalletSnapshot = {};
+  if (receiveChain === 'midnight') {
+    if (!snap.midnightCpkBytes || !HEX64.test(snap.midnightCpkBytes.toLowerCase())) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightCpkBytes required (64-hex)');
+    }
+    if (!snap.midnightUnshieldedBytes || !HEX64.test(snap.midnightUnshieldedBytes.toLowerCase())) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightUnshieldedBytes required (64-hex)');
+    }
+    if (!snap.midnightCpkBech32 || !snap.midnightCpkBech32.startsWith('mn_shield-cpk_')) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightCpkBech32 required');
+    }
+    if (!snap.midnightUnshieldedBech32 || !snap.midnightUnshieldedBech32.startsWith('mn_addr_')) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightUnshieldedBech32 required');
+    }
+    out.midnightCpkBytes = snap.midnightCpkBytes.toLowerCase();
+    out.midnightUnshieldedBytes = snap.midnightUnshieldedBytes.toLowerCase();
+    out.midnightCpkBech32 = snap.midnightCpkBech32;
+    out.midnightUnshieldedBech32 = snap.midnightUnshieldedBech32;
+  } else {
+    if (!snap.cardanoPkh || !HEX56.test(snap.cardanoPkh.toLowerCase())) {
+      throw new OtcError('invalid_wallet_snapshot', 'cardanoPkh required (56-hex)');
+    }
+    if (!snap.cardanoAddress || !snap.cardanoAddress.startsWith('addr')) {
+      throw new OtcError('invalid_wallet_snapshot', 'cardanoAddress required (addr/addr_test)');
+    }
+    out.cardanoPkh = snap.cardanoPkh.toLowerCase();
+    out.cardanoAddress = snap.cardanoAddress;
+  }
+  return out;
+};
+
+/**
+ * Which chain a given party RECEIVES on, given the RFQ side.
+ *   originator: sell-usdm → receives USDC on Midnight
+ *   originator: sell-usdc → receives USDM on Cardano
+ *   counterparty: opposite of originator
+ */
+export const receiveChainFor = (
+  side: RfqSide,
+  role: 'originator' | 'counterparty',
+): 'midnight' | 'cardano' => {
+  if (role === 'originator') return side === 'sell-usdm' ? 'midnight' : 'cardano';
+  return side === 'sell-usdm' ? 'cardano' : 'midnight';
+};
 
 const rowToActivity = (row: ActivityRow): Activity => ({
   id: row.id,
@@ -666,23 +731,24 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
       expires_at                 INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS quotes (
-      id                    TEXT PRIMARY KEY,
-      rfq_id                TEXT NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
-      provider_id           TEXT NOT NULL,
-      provider_name         TEXT NOT NULL,
-      version               INTEGER NOT NULL,
-      parent_quote_id       TEXT,
-      price                 TEXT NOT NULL,
-      sell_amount           TEXT NOT NULL,
-      buy_amount            TEXT NOT NULL,
-      status                TEXT NOT NULL CHECK (status IN (
-                              'Submitted','Countered','Accepted','Rejected','Expired'
-                            )),
-      note                  TEXT,
-      submitted_by_user_id  TEXT NOT NULL,
-      submitted_by_name     TEXT NOT NULL,
-      created_at            INTEGER NOT NULL,
-      updated_at            INTEGER NOT NULL
+      id                     TEXT PRIMARY KEY,
+      rfq_id                 TEXT NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+      provider_id            TEXT NOT NULL,
+      provider_name          TEXT NOT NULL,
+      version                INTEGER NOT NULL,
+      parent_quote_id        TEXT,
+      price                  TEXT NOT NULL,
+      sell_amount            TEXT NOT NULL,
+      buy_amount             TEXT NOT NULL,
+      status                 TEXT NOT NULL CHECK (status IN (
+                               'Submitted','Countered','Accepted','Rejected','Expired'
+                             )),
+      note                   TEXT,
+      submitted_by_user_id   TEXT NOT NULL,
+      submitted_by_name      TEXT NOT NULL,
+      quoter_wallet_snapshot TEXT,
+      created_at             INTEGER NOT NULL,
+      updated_at             INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS activities (
       id                TEXT PRIMARY KEY,
@@ -694,6 +760,16 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
       related_quote_id  TEXT,
       created_at        INTEGER NOT NULL
     );
+  `);
+
+  // Additive migration: existing dev DBs may have a quotes table without
+  // quoter_wallet_snapshot. Add it if missing — idempotent.
+  const quoteCols = db.prepare('PRAGMA table_info(quotes)').all() as Array<{ name: string }>;
+  if (!quoteCols.some((c) => c.name === 'quoter_wallet_snapshot')) {
+    db.exec('ALTER TABLE quotes ADD COLUMN quoter_wallet_snapshot TEXT');
+  }
+
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_rfqs_status      ON rfqs(status);
     CREATE INDEX IF NOT EXISTS idx_rfqs_originator  ON rfqs(originator_id);
     CREATE INDEX IF NOT EXISTS idx_rfqs_swap_hash   ON rfqs(swap_hash);
@@ -792,11 +868,13 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
     INSERT INTO quotes (
       id, rfq_id, provider_id, provider_name, version, parent_quote_id,
       price, sell_amount, buy_amount, status, note,
-      submitted_by_user_id, submitted_by_name, created_at, updated_at
+      submitted_by_user_id, submitted_by_name, quoter_wallet_snapshot,
+      created_at, updated_at
     ) VALUES (
       @id, @rfq_id, @provider_id, @provider_name, @version, @parent_quote_id,
       @price, @sell_amount, @buy_amount, @status, @note,
-      @submitted_by_user_id, @submitted_by_name, @created_at, @updated_at
+      @submitted_by_user_id, @submitted_by_name, @quoter_wallet_snapshot,
+      @created_at, @updated_at
     )
   `);
   const updateQuoteStatusStmt = db.prepare<[QuoteStatus, number, string]>(
@@ -971,13 +1049,9 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
     createRfq(input) {
       const originator = this.getUserById(input.originatorId);
       if (!originator) throw new OtcError('not_found', 'originator not found', 404);
-      if (!this.getUserWallet(input.originatorId)) {
-        throw new OtcError(
-          'wallets_missing',
-          'connect both wallets before posting an RFQ',
-          409,
-        );
-      }
+      // No global wallet binding required — the originator commits to a wallet
+      // when they sign the lock/deposit (existing reducer captures from the
+      // connected session). Posting an RFQ is just an intent.
       const id = randomUUID();
       const now = Date.now();
       const reference = nextReference();
@@ -1060,9 +1134,11 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
       }
       const provider = this.getUserById(input.providerId);
       if (!provider) throw new OtcError('not_found', 'provider not found', 404);
-      if (!this.getUserWallet(input.providerId)) {
-        throw new OtcError('wallets_missing', 'connect both wallets before quoting', 409);
-      }
+
+      // Per-deal wallet binding: validate the snapshot for the chain the
+      // quoter will RECEIVE on. No global user_wallets dependency.
+      const receiveChain = receiveChainFor(rfq.side, 'counterparty');
+      const snapshot = validateWalletSnapshot(input.walletSnapshot, receiveChain);
 
       const id = randomUUID();
       const now = Date.now();
@@ -1083,6 +1159,7 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         note: input.note ?? null,
         submitted_by_user_id: provider.id,
         submitted_by_name: provider.fullName,
+        quoter_wallet_snapshot: JSON.stringify(snapshot),
         created_at: now,
         updated_at: now,
       });
@@ -1131,9 +1208,13 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
           403,
         );
       }
-      if (!this.getUserWallet(actor.id)) {
-        throw new OtcError('wallets_missing', 'connect both wallets before countering', 409);
-      }
+
+      // Per-deal wallet binding: validate the snapshot for the chain the
+      // ACTOR will receive on (originator and counterparty receive opposite
+      // chains, so role determines which fields are required).
+      const role = actor.id === rfq.originatorId ? 'originator' : 'counterparty';
+      const receiveChain = receiveChainFor(rfq.side, role);
+      const snapshot = validateWalletSnapshot(input.walletSnapshot, receiveChain);
 
       const now = Date.now();
       // Mark parent Countered.
@@ -1154,6 +1235,7 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         note: input.note ?? null,
         submitted_by_user_id: actor.id,
         submitted_by_name: actor.fullName,
+        quoter_wallet_snapshot: JSON.stringify(snapshot),
         created_at: now,
         updated_at: now,
       });
@@ -1187,15 +1269,15 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         throw new OtcError('not_found', 'quote not found', 404);
       }
 
-      const originatorWallet = this.getUserWallet(rfq.originatorId);
-      const providerWallet = this.getUserWallet(quote.provider_id);
-      const missing: string[] = [];
-      if (!originatorWallet) missing.push('originator');
-      if (!providerWallet) missing.push('counterparty');
-      if (missing.length > 0) {
+      // The accepted quote MUST carry a wallet snapshot — submit/counter
+      // captured one from the connected session at the time. If absent,
+      // the quote was created under the legacy flow and can't be settled
+      // by the bridge; the originator would have to fall back to the paste
+      // path. Surface explicitly so the UI can prompt the quoter to resubmit.
+      if (!quote.quoter_wallet_snapshot) {
         throw new OtcError(
-          'wallets_missing',
-          `wallets not bound: ${missing.join(', ')}`,
+          'wallet_snapshot_missing',
+          'this quote has no wallet snapshot — ask the counterparty to re-submit',
           409,
         );
       }
@@ -1205,7 +1287,7 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         // WHERE-guarded transition defeats double-accept races. If 0 rows
         // changed, another tab beat us — surface 409.
         const updateRfq = db
-          .prepare<{ now: number; quote_id: string; provider_id: string; provider_name: string; provider_email: string; price: string; originator_snap: string; provider_snap: string; rfq_id: string }>(`
+          .prepare<{ now: number; quote_id: string; provider_id: string; provider_name: string; provider_email: string; price: string; provider_snap: string; rfq_id: string }>(`
             UPDATE rfqs SET
               status = 'QuoteSelected',
               selected_quote_id = @quote_id,
@@ -1213,7 +1295,7 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
               selected_provider_name = @provider_name,
               selected_provider_email = @provider_email,
               accepted_price = @price,
-              originator_wallet_snapshot = @originator_snap,
+              originator_wallet_snapshot = NULL,
               provider_wallet_snapshot = @provider_snap,
               updated_at = @now
             WHERE id = @rfq_id AND status IN ('OpenForQuotes','Negotiating')
@@ -1226,8 +1308,7 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
             provider_name: quote.provider_name,
             provider_email: this.getUserById(quote.provider_id)?.email ?? '',
             price: quote.price,
-            originator_snap: JSON.stringify(originatorWallet),
-            provider_snap: JSON.stringify(providerWallet),
+            provider_snap: quote.quoter_wallet_snapshot!,
           });
         if (updateRfq.changes === 0) {
           throw new OtcError(

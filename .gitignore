@@ -43,6 +43,9 @@ jspm_packages/
 
 # dotenv environment variables file
 .env
+# Local-only env overrides (Vite convention; keep secrets here, never in tracked .env.preprod)
+*.local
+.env.*.local
 
 # Wallet keys (sensitive)
 address.json

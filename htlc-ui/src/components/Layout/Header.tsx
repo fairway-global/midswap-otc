@@ -15,11 +15,11 @@ import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import { alpha } from '@mui/material/styles';
 import { Logo } from './Logo';
 import { WalletMenu } from '../WalletMenu';
-import { useSwapContext } from '../../hooks';
+import { useAuth, useSwapContext } from '../../hooks';
+import { useToast } from '../../hooks/useToast';
 
 const NAV: Array<{ to: string; label: string }> = [
-  { to: '/app', label: 'OTC' },
-  { to: '/browse', label: 'Order Book' },
+  { to: '/orderbook', label: 'Order Book' },
   { to: '/activity', label: 'Activity' },
   { to: '/reclaim', label: 'Reclaim' },
 ];
@@ -31,9 +31,27 @@ export const Header: React.FC = () => {
   const compact = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const { session, cardano } = useSwapContext();
+  const { user, signOut, configured } = useAuth();
+  const toast = useToast();
 
   const anyConnected = !!session || !!cardano;
   const teal = '#2DD4BF';
+
+  const initials = (user?.fullName ?? user?.email ?? '')
+    .split(/\s+/)
+    .map((p) => p.charAt(0).toUpperCase())
+    .slice(0, 2)
+    .join('');
+
+  const onSignOut = async (): Promise<void> => {
+    try {
+      await signOut();
+      toast.info('Signed out');
+      void navigate('/');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Sign-out failed');
+    }
+  };
 
   const isActive = (to: string): boolean =>
     location.pathname === to || (to !== '/' && location.pathname.startsWith(to));
@@ -53,9 +71,9 @@ export const Header: React.FC = () => {
     >
       <Toolbar
         sx={{
-          gap: 2,
-          px: { xs: 2, md: 3 },
-          minHeight: { xs: 52, md: 56 },
+          gap: { xs: 2, md: 3 },
+          px: { xs: 2, md: 4 },
+          minHeight: { xs: 52, md: 60 },
         }}
       >
         <Box component={RouterLink} to="/" sx={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
@@ -95,23 +113,96 @@ export const Header: React.FC = () => {
 
         {compact && <Box sx={{ flex: 1 }} />}
 
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1.75} alignItems="center">
+          {/* Auth pill — sign-in CTA or signed-in identity */}
+          {configured && !compact && (
+            user ? (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Box
+                  sx={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: '50%',
+                    bgcolor: alpha(teal, 0.16),
+                    color: teal,
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: '0.66rem',
+                    display: 'grid',
+                    placeItems: 'center',
+                    border: `1px solid ${alpha(teal, 0.3)}`,
+                  }}
+                  title={user.fullName}
+                >
+                  {initials || '·'}
+                </Box>
+                <Button
+                  size="small"
+                  onClick={() => void onSignOut()}
+                  sx={{
+                    fontSize: '0.66rem',
+                    color: alpha('#FFFFFF', 0.5),
+                    '&:hover': { color: theme.custom.danger, bgcolor: 'transparent' },
+                  }}
+                >
+                  Sign out
+                </Button>
+              </Stack>
+            ) : (
+              <Button
+                size="small"
+                variant="outlined"
+                color="primary"
+                onClick={() => void navigate('/login')}
+                sx={{ height: 30, fontSize: '0.7rem' }}
+              >
+                Sign in
+              </Button>
+            )
+          )}
+
           {/* Connection status dot */}
-          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mr: 0.5 }}>
-            <Box
-              sx={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                bgcolor: anyConnected ? teal : theme.custom.terminalRed,
-                boxShadow: anyConnected
-                  ? `0 0 6px ${alpha(teal, 0.6)}`
-                  : `0 0 6px ${alpha(theme.custom.terminalRed, 0.6)}`,
-              }}
-            />
-          </Stack>
+          <Box
+            sx={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              bgcolor: anyConnected ? teal : theme.custom.terminalRed,
+              boxShadow: anyConnected
+                ? `0 0 6px ${alpha(teal, 0.6)}`
+                : `0 0 6px ${alpha(theme.custom.terminalRed, 0.6)}`,
+            }}
+          />
 
           <WalletMenu />
+
+          {/* Faucet — separate prominent CTA, not buried in nav. Amber bordered
+              like ContraClear so testers spot it. */}
+          {!compact && (
+            <Button
+              size="small"
+              onClick={() => void navigate('/faucet')}
+              sx={{
+                height: 30,
+                px: 1.5,
+                ml: 0.5,
+                borderRadius: 999,
+                border: `1px solid ${alpha(theme.custom.warning, 0.5)}`,
+                bgcolor: alpha(theme.custom.warning, 0.06),
+                color: theme.custom.warning,
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                '&:hover': {
+                  borderColor: theme.custom.warning,
+                  bgcolor: alpha(theme.custom.warning, 0.12),
+                },
+              }}
+            >
+              Faucet
+            </Button>
+          )}
 
           {compact && (
             <IconButton onClick={() => setDrawerOpen(true)} aria-label="Menu" size="small">
@@ -144,15 +235,18 @@ export const Header: React.FC = () => {
           <Stack spacing={0.25} sx={{ mt: 2 }}>
             {[
               ...NAV,
-              { to: '/mint', label: 'Mint USDC' },
-              { to: '/mint-usdm', label: 'Mint USDM' },
+              { to: '/faucet', label: 'Faucet' },
               { to: '/how', label: 'How It Works' },
+              ...(configured ? [user
+                ? { to: '#signout', label: 'Sign out' }
+                : { to: '/login', label: 'Sign in' }] : []),
             ].map(
               ({ to, label }) => (
                 <Button
                   key={to}
                   onClick={() => {
-                    void navigate(to);
+                    if (to === '#signout') void onSignOut();
+                    else void navigate(to);
                     setDrawerOpen(false);
                   }}
                   sx={{

@@ -60,13 +60,15 @@ interface Props {
   readonly revTaker: UseReverseTakerFlow;
 }
 
-const TX_SCAN_BASE = {
-  midnight: 'https://indexer.preprod.midnight.network/tx/',
-  cardano: 'https://preprod.cardanoscan.io/transaction/',
+// 1AM explorer for Midnight (https://explorer.1am.xyz/tx/<hash>?network=preprod);
+// CardanoScan for the Cardano leg.
+const TX_SCAN_URL: Record<'midnight' | 'cardano', (hash: string) => string> = {
+  midnight: (h) => `https://explorer.1am.xyz/tx/${h}?network=preprod`,
+  cardano: (h) => `https://preprod.cardanoscan.io/transaction/${h}`,
 };
 
 const txLink = (chain: 'midnight' | 'cardano', hash: string): React.ReactNode => (
-  <Link href={`${TX_SCAN_BASE[chain]}${hash}`} target="_blank" rel="noopener" sx={{ fontSize: 12 }}>
+  <Link href={TX_SCAN_URL[chain](hash)} target="_blank" rel="noopener" sx={{ fontSize: 12 }}>
     <code style={{ fontSize: 12 }}>
       {hash.slice(0, 8)}…{hash.slice(-6)}
     </code>{' '}

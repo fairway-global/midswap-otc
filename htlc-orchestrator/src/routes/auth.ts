@@ -4,6 +4,28 @@ import type { UserWalletInput } from '../types.js';
 
 const isString = (v: unknown): v is string => typeof v === 'string';
 
+interface SignupBody {
+  email: string;
+  password: string;
+  fullName: string;
+  institutionName: string;
+}
+
+const validateSignup = (body: unknown): SignupBody | string => {
+  if (!body || typeof body !== 'object') return 'body must be an object';
+  const b = body as Record<string, unknown>;
+  if (!isString(b.email) || !b.email.includes('@')) return 'email required';
+  if (!isString(b.password) || b.password.length < 8) return 'password must be at least 8 characters';
+  if (!isString(b.fullName) || b.fullName.length === 0) return 'fullName required';
+  if (!isString(b.institutionName)) return 'institutionName required';
+  return {
+    email: b.email,
+    password: b.password,
+    fullName: b.fullName,
+    institutionName: b.institutionName,
+  };
+};
+
 const validateWalletBody = (body: unknown): UserWalletInput | string => {
   if (!body || typeof body !== 'object') return 'body must be an object';
   const b = body as Record<string, unknown>;
@@ -32,6 +54,43 @@ const validateWalletBody = (body: unknown): UserWalletInput | string => {
 export const authRoutes =
   (store: OtcStore): FastifyPluginAsync =>
   async (app) => {
+    /**
+     * Server-side signup — uses Supabase admin API with `email_confirm: true`
+     * so the user lands fully activated and can sign in immediately. Mirrors
+     * otc-server (ui/otc-server/src/routes/otc.ts:139). Skips the
+     * confirmation-email round-trip; the frontend signs the user in right
+     * after this returns.
+     */
+    app.post('/auth/signup', async (req, reply) => {
+      const parsed = validateSignup(req.body);
+      if (typeof parsed === 'string') return reply.code(400).send({ error: parsed });
+      try {
+        const { data, error } = await app.supabase.auth.admin.createUser({
+          email: parsed.email,
+          password: parsed.password,
+          email_confirm: true,
+          user_metadata: {
+            full_name: parsed.fullName,
+            institution_name: parsed.institutionName,
+          },
+        });
+        if (error) {
+          // 'User already registered' / similar — surface verbatim.
+          return reply.code(400).send({ error: 'signup_failed', message: error.message });
+        }
+        const otcUser = store.getOrCreateUserBySupabaseId(
+          data.user!.id,
+          parsed.email,
+          parsed.fullName,
+          parsed.institutionName,
+        );
+        return reply.code(201).send({ user: otcUser });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'signup failed';
+        return reply.code(500).send({ error: 'internal', message });
+      }
+    });
+
     app.get('/auth/me', { preHandler: app.requireAuth }, async (req, reply) => {
       const user = req.otcUser!;
       const wallet = store.getUserWallet(user.id) ?? null;

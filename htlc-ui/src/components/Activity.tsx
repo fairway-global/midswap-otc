@@ -58,9 +58,11 @@ const formatAge = (ms: number): string => {
 
 const shortHash = (hash: string): string => `${hash.slice(0, 10)}…${hash.slice(-4)}`;
 
-const TX_SCAN_BASE: Record<string, string> = {
-  midnight: 'https://indexer.preprod.midnight.network/tx/',
-  cardano: 'https://preprod.cardanoscan.io/transaction/',
+// 1AM explorer for Midnight (https://explorer.1am.xyz/tx/<hash>?network=preprod);
+// CardanoScan for the Cardano leg.
+const TX_SCAN_BASE: Record<string, (hash: string) => string> = {
+  midnight: (h) => `https://explorer.1am.xyz/tx/${h}?network=preprod`,
+  cardano: (h) => `https://preprod.cardanoscan.io/transaction/${h}`,
 };
 
 export const Activity: React.FC = () => {
@@ -131,7 +133,7 @@ export const Activity: React.FC = () => {
       );
     return (
       <a
-        href={`${TX_SCAN_BASE[chain]}${hash}`}
+        href={TX_SCAN_BASE[chain](hash)}
         target="_blank"
         rel="noopener noreferrer"
         style={{ color: theme.custom.cardanoBlue, textDecoration: 'none', fontSize: '0.68rem' }}

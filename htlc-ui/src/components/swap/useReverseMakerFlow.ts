@@ -27,6 +27,8 @@ export interface ReverseMakerLockParams {
   readonly counterpartyCpkBytes: Uint8Array;
   /** Counterparty's Midnight unshielded address as 64-hex (decoded bytes). */
   readonly counterpartyUnshieldedBytes: Uint8Array;
+  /** OTC bridge link — when present, the orchestrator stamps the RFQ as Settling. */
+  readonly rfqId?: string;
 }
 
 export type ReverseMakerStep =
@@ -407,6 +409,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
             bobCpk: bytesToHex(params.counterpartyCpkBytes),
             bobUnshielded: bytesToHex(params.counterpartyUnshieldedBytes),
             bobPkh: cardano.paymentKeyHash,
+            rfqId: params.rfqId,
           }),
         'createSwap reverse',
       );

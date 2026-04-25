@@ -3,7 +3,7 @@
  * and (separately) connects Eternl + initializes the Cardano HTLC browser client.
  */
 
-import React, { createContext, useCallback, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Logger } from 'pino';
 import { BrowserHtlcManager, type SwapBootstrap } from './BrowserHtlcManager';
 import { HtlcAPI } from '../api/htlc-api';
@@ -53,7 +53,30 @@ export interface SwapContextValue {
   readonly cardanoError: Error | undefined;
   connect: () => Promise<SwapSession>;
   connectCardano: (walletName?: string) => Promise<CardanoSession>;
+  /** Forget the local session AND clear the silent-reconnect flag. Wallet
+   *  permission stays with the extension; user revokes there if they want. */
+  disconnect: () => void;
 }
+
+// Silent reconnect: remember which wallets were connected last time so a
+// page reload restores them without a click. Wallet extensions (Lace,
+// Eternl) honor `enable()` silently when permission was previously granted.
+const RECONNECT_KEY = 'kaamos:wallets-prev';
+type ReconnectFlags = { midnight?: boolean; cardano?: boolean };
+const readReconnect = (): ReconnectFlags => {
+  try {
+    return JSON.parse(window.localStorage.getItem(RECONNECT_KEY) ?? '{}') as ReconnectFlags;
+  } catch {
+    return {};
+  }
+};
+const writeReconnect = (next: ReconnectFlags): void => {
+  try {
+    window.localStorage.setItem(RECONNECT_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+};
 
 export const SwapContext = createContext<SwapContextValue | undefined>(undefined);
 
@@ -96,6 +119,7 @@ export const SwapProvider: React.FC<Props> = ({ logger, children }) => {
         ]);
         const next: SwapSession = { bootstrap, htlcApi, usdcApi };
         setSession(next);
+        writeReconnect({ ...readReconnect(), midnight: true });
         return next;
       } catch (e) {
         const err = e instanceof Error ? e : new Error(String(e));
@@ -138,6 +162,7 @@ export const SwapProvider: React.FC<Props> = ({ logger, children }) => {
           logger.info({ paymentKeyHash, address, usdmPolicyId: usdmPolicy.policyId }, 'Cardano wallet ready');
           const next: CardanoSession = { cardanoHtlc, usdmPolicy, paymentKeyHash, address, api };
           setCardano(next);
+          writeReconnect({ ...readReconnect(), cardano: true });
           return next;
         } catch (e) {
           const err = e instanceof Error ? e : new Error(String(e));
@@ -154,6 +179,36 @@ export const SwapProvider: React.FC<Props> = ({ logger, children }) => {
     [cardano, cardanoInflight, logger],
   );
 
+  const disconnect = useCallback(() => {
+    setSession(undefined);
+    setCardano(undefined);
+    setError(undefined);
+    setCardanoError(undefined);
+    writeReconnect({});
+  }, []);
+
+  // Silent reconnect on mount — only once. Failures clear the relevant
+  // flag so we don't loop. No toast on silent attempts: the user may have
+  // revoked permission in the wallet UI, in which case the manual Connect
+  // path stays available.
+  const reconnectAttempted = useRef(false);
+  useEffect(() => {
+    if (reconnectAttempted.current) return;
+    reconnectAttempted.current = true;
+    const prev = readReconnect();
+    if (prev.midnight) {
+      void connect().catch(() => {
+        writeReconnect({ ...readReconnect(), midnight: false });
+      });
+    }
+    if (prev.cardano) {
+      void connectCardano().catch(() => {
+        writeReconnect({ ...readReconnect(), cardano: false });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const value = useMemo<SwapContextValue>(
     () => ({
       swapState: swapState as SwapState,
@@ -165,8 +220,9 @@ export const SwapProvider: React.FC<Props> = ({ logger, children }) => {
       cardanoError,
       connect,
       connectCardano,
+      disconnect,
     }),
-    [session, cardano, connecting, cardanoConnecting, error, cardanoError, connect, connectCardano],
+    [session, cardano, connecting, cardanoConnecting, error, cardanoError, connect, connectCardano, disconnect],
   );
 
   return <SwapContext.Provider value={value}>{children}</SwapContext.Provider>;

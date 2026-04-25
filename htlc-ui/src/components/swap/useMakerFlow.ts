@@ -20,6 +20,8 @@ export interface MakerLockParams {
   readonly usdcAmount: bigint;
   readonly deadlineMin: number;
   readonly counterpartyPkh: string;
+  /** OTC bridge link — when present, the orchestrator stamps the RFQ as Settling. */
+  readonly rfqId?: string;
 }
 
 export type MakerStep =
@@ -302,6 +304,7 @@ export const useMakerFlow = (): UseMakerFlow => {
               cardanoDeadlineMs: Number(deadlineMs),
               cardanoLockTx: lockTxHash,
               bobPkh: params.counterpartyPkh,
+              rfqId: params.rfqId,
             }),
           'createSwap',
         );
