@@ -3,7 +3,7 @@
 # package-lock.json at the root shared by all packages including htlc-orchestrator.
 
 # ── Deps stage ───────────────────────────────────────────────────────────────
-FROM node:22-slim AS deps
+FROM node:24-slim AS deps
 
 # python3 + make + g++ are required by node-gyp to compile better-sqlite3's
 # native .node binary. They are only needed at build time, not at runtime.
@@ -26,7 +26,7 @@ COPY htlc-orchestrator/package.json ./htlc-orchestrator/
 RUN npm ci --workspace=htlc-orchestrator
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM node:22-slim AS runner
+FROM node:24-slim AS runner
 
 # libsqlite3-0 is the shared library that better-sqlite3's .node binary links
 # against at runtime. Must be present in the final image.
