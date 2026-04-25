@@ -19,7 +19,7 @@ const MARQUEE_LOGOS: Array<{type:'img'|'text', src?:string, alt?:string, label?:
   {type:'img', src:'/marquee-midnight-full.png', alt:'Midnight'},
   {type:'text', label:'ZK COMPLIANCE'},
 ];
-const PHRASES = ['Zero Counterparty Risk.','Self-Custody Execution.','Atomic Settlement.','Full Compliance.'];
+const PHRASES = ['Zero Counterparty Risk.','Self-Custody Execution.','Atomic Settlement.','Full Compliance'];
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
