@@ -160,19 +160,6 @@ export const Header: React.FC = () => {
             )
           )}
 
-          {/* Connection status dot */}
-          <Box
-            sx={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              bgcolor: anyConnected ? teal : theme.custom.terminalRed,
-              boxShadow: anyConnected
-                ? `0 0 6px ${alpha(teal, 0.6)}`
-                : `0 0 6px ${alpha(theme.custom.terminalRed, 0.6)}`,
-            }}
-          />
-
           <WalletMenu />
 
           {/* Faucet — separate prominent CTA, not buried in nav. Amber bordered

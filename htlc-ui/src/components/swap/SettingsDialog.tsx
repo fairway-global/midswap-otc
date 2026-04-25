@@ -101,9 +101,9 @@ export const SettingsDialog: React.FC<Props> = ({ open, onClose, deadlineMin, on
               <Row k="Midnight safety buffer" v={`${limits.bobSafetyBufferSecs} s`} />
               <Row k="Minimum Midnight TTL" v={`${limits.bobMinDepositTtlSecs} s`} />
             </Stack>
-            <Typography variant="caption" sx={{ color: theme.custom.textMuted, mt: 1, display: 'block' }}>
+            {/* <Typography variant="caption" sx={{ color: theme.custom.textMuted, mt: 1, display: 'block' }}>
               Override via <code>VITE_*</code> env vars — do not edit in code.
-            </Typography>
+            </Typography> */}
           </Box>
         </Stack>
       </DialogContent>
