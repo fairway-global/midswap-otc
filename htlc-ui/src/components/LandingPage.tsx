@@ -124,7 +124,7 @@ export const LandingPage: React.FC = () => {
             </span>
           </h1>
           <p className="hero-subtitle" data-animate="fade-up" data-delay="400">
-            Regulatory-compliant, direct institutional settlement across Cardano and Midnight. Exchange <strong style={{ color: '#fff', fontWeight: 600 }}>USDM on Cardano</strong> for <strong style={{ color: '#fff', fontWeight: 600 }}>USDC on Midnight</strong> with no custodian, no exchange, no wrapped synthetics. Two desks, two chains, one cryptographically-final transaction.
+            Regulatory-compliant, direct institutional settlement across Cardano and Midnight. Trade <strong style={{ color: '#fff', fontWeight: 600 }}>USDM on Cardano</strong> for <strong style={{ color: '#fff', fontWeight: 600 }}>USDC on Midnight</strong> with no custodian, no exchange, no wrapped synthetics. Two desks, two chains, one cryptographically-final transaction.
           </p>
           <div className="hero-actions" data-animate="fade-up" data-delay="700">
             <a href="#" className="btn btn-primary" onClick={goApp}>Launch App</a>
