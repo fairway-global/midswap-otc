@@ -488,7 +488,7 @@ const SettlementPanel: React.FC<SettlementPanelProps> = ({
   // The counterparty's RECEIVE address — what the originator's outgoing tokens
   // bind to. Forward (sell-usdm): provider's Cardano address. Reverse
   // (sell-usdc): provider's Midnight unshielded.
-  const provider = rfq.providerWalletSnapshot;
+  const provider = rfq.providerWalletSnapshot ?? acceptedQuote?.walletSnapshot;
   const receiveChainLabel = rfq.side === 'sell-usdm' ? 'Cardano' : 'Midnight';
   const receiverAddress =
     rfq.side === 'sell-usdm'

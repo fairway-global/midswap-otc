@@ -9,6 +9,7 @@ import type { CardanoHTLCBrowser } from './cardano-htlc-browser';
 
 export interface CardanoHTLCInfo {
   hashHex: string;
+  lockTxHash: string;
   /** USDM quantity at the locked UTxO (native-asset qty under the USDM policy unit). */
   amountUsdm: bigint;
   /** Min-ADA riding on the UTxO — refunded to the spender alongside USDM. */
@@ -52,6 +53,7 @@ export async function watchForCardanoLock(
 
         return {
           hashHex: datum.preimageHash,
+          lockTxHash: utxo.txHash,
           amountUsdm: utxo.assets[usdmUnit] ?? 0n,
           amountLovelace: utxo.assets.lovelace ?? 0n,
           deadlineMs: datum.deadline,

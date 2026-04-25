@@ -158,7 +158,11 @@ export const SwapCard: React.FC = () => {
   // inputs render pre-filled and read-only with a "bound from order"
   // badge, and `rfqId` is propagated through createSwap.
   const rfqIdFromUrl = searchParams.get('rfqId');
-  const [rfqContext, setRfqContext] = useState<{ rfq: Rfq; provider: WalletSnapshot } | null>(null);
+  const [rfqContext, setRfqContext] = useState<{
+    rfq: Rfq;
+    provider: WalletSnapshot;
+    acceptedBuyAmount?: string;
+  } | null>(null);
   const rfqHydratedRef = React.useRef(false);
   useEffect(() => {
     if (!rfqIdFromUrl || hashInUrl) return;
@@ -167,11 +171,26 @@ export const SwapCard: React.FC = () => {
       try {
         const r = await otcApi.getRfq(rfqIdFromUrl);
         if (cancelled) return;
-        if (!r.providerWalletSnapshot) {
+        let provider = r.providerWalletSnapshot ?? undefined;
+        let acceptedBuyAmount: string | undefined;
+        if (r.selectedQuoteId) {
+          try {
+            const qs = await otcApi.listQuotes(rfqIdFromUrl);
+            const accepted = qs.quotes.find((q) => q.id === r.selectedQuoteId);
+            if (accepted) {
+              acceptedBuyAmount = accepted.buyAmount;
+              provider = provider ?? accepted.walletSnapshot ?? undefined;
+            }
+          } catch {
+            // Ignore; we'll fall back to acceptedPrice math.
+          }
+        }
+
+        if (!provider) {
           toast.warning('Order is not ready for settlement yet — counterparty wallet missing.');
           return;
         }
-        setRfqContext({ rfq: r, provider: r.providerWalletSnapshot });
+        setRfqContext({ rfq: r, provider, acceptedBuyAmount });
       } catch (e) {
         if (!cancelled) toast.error(e instanceof Error ? e.message : 'Could not load order');
       }
@@ -187,9 +206,20 @@ export const SwapCard: React.FC = () => {
     if (!rfqContext || rfqHydratedRef.current) return;
     rfqHydratedRef.current = true;
     const { direction, usdmAmount: u, usdcAmount: c } = rfqAmounts(rfqContext.rfq);
+    const acceptedBuyAmount = rfqContext.acceptedBuyAmount;
     setFlowDirection(direction);
-    setUsdmAmount(u);
-    setUsdcAmount(c);
+    if (acceptedBuyAmount) {
+      if (direction === 'usdm-usdc') {
+        setUsdmAmount(rfqContext.rfq.sellAmount);
+        setUsdcAmount(acceptedBuyAmount);
+      } else {
+        setUsdcAmount(rfqContext.rfq.sellAmount);
+        setUsdmAmount(acceptedBuyAmount);
+      }
+    } else {
+      setUsdmAmount(u);
+      setUsdcAmount(c);
+    }
     if (direction === 'usdm-usdc') {
       // Forward — maker locks USDM on Cardano against taker's PKH. The
       // counterparty's snapshot must have cardano fields (validated server-

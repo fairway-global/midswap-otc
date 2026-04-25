@@ -25,6 +25,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { alpha, useTheme } from '@mui/material/styles';
+import type { CardanoHTLCInfo } from '../../api/cardano-watcher';
 import type { FlowDirection, Role, TokenMeta } from './tokens';
 import type { UseMakerFlow, MakerStep } from './useMakerFlow';
 import type { UseTakerFlow, TakerStep } from './useTakerFlow';
@@ -171,6 +172,7 @@ const buildForwardTakerPhases = (
     state.kind === 'done';
   const afterPreimage = state.kind === 'claim-ready' || state.kind === 'claiming' || state.kind === 'done';
   const afterClaim = state.kind === 'done';
+  const lockInfo = afterWatch ? (state as Extract<TakerStep, { htlcInfo: CardanoHTLCInfo }>).htlcInfo : undefined;
 
   return [
     {
@@ -180,7 +182,14 @@ const buildForwardTakerPhases = (
         state.kind === 'watching-cardano'
           ? 'Scanning Cardano for the lock bound to your wallet…'
           : afterWatch
-            ? `Found: ${(state as Extract<TakerStep, { htlcInfo: unknown }>).htlcInfo.amountUsdm.toString()} USDM locked.`
+            ? lockInfo && (
+                <Stack spacing={0.25}>
+                  <Typography variant="caption">Found: {lockInfo.amountUsdm.toString()} USDM locked.</Typography>
+                  <Typography variant="caption">
+                    Lock tx: {txLink('cardano', lockInfo.lockTxHash)}
+                  </Typography>
+                </Stack>
+              )
             : state.kind === 'unsafe-deadline'
               ? state.reason
               : 'Waiting for wallet connection.',
@@ -281,6 +290,7 @@ const buildReverseMakerPhases = (
   const afterDeposit = hasDepositInfo || state.kind === 'done';
   const afterCardanoLock = state.kind === 'claim-ready' || state.kind === 'claiming' || state.kind === 'done';
   const afterClaim = state.kind === 'done';
+  const lockInfo = state.kind === 'claim-ready' || state.kind === 'claiming' ? state.cardanoHtlc : undefined;
 
   let depositSubtitle: React.ReactNode;
   if (state.kind === 'depositing') {
@@ -318,6 +328,11 @@ const buildReverseMakerPhases = (
       subtitle:
         state.kind === 'done' ? (
           <>Claim tx {txLink('cardano', state.claimTxHash)}. Preimage revealed via tx redeemer.</>
+        ) : lockInfo ? (
+          <Stack spacing={0.25}>
+            <Typography variant="caption">Counterparty locked {lockInfo.amountUsdm.toString()} USDM.</Typography>
+            <Typography variant="caption">Lock tx: {txLink('cardano', lockInfo.lockTxHash)}</Typography>
+          </Stack>
         ) : afterCardanoLock ? (
           'Counterparty locked USDM — claim it now. The preimage is revealed via the Cardano tx redeemer.'
         ) : (
