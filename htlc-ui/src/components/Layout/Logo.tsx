@@ -1,44 +1,44 @@
 /**
- * KAAMOS wordmark — uses the aurora logo image asset.
+ * KAAMOS logo — flame icon + wordmark image.
  *
- * Shows the full KAAMOS aurora logo (compact = icon only)
- * with "KAAMOS" text beside it.
+ * Mirrors the landing-page sticky-nav logo so the app header reads as the
+ * same brand mark (same flame asset, same wordmark, same proportions).
+ *
+ * The negative margins on the flame are intentional: the source PNG has
+ * generous transparent padding around the aurora glow, and the negative
+ * margins crop that padding visually so the mark sits tight against the
+ * wordmark — matching `.klp .logo-img--small` in `landing/LandingCSS.ts`.
  */
 
 import React from 'react';
-import { Box, Typography } from '@mui/material';
-import { useTheme } from '@mui/material/styles';
+import { Box } from '@mui/material';
 
-export const Logo: React.FC<{ compact?: boolean }> = ({ compact }) => {
-  const theme = useTheme();
-  return (
-    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, userSelect: 'none' }}>
+export const Logo: React.FC<{ compact?: boolean }> = ({ compact }) => (
+  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, userSelect: 'none' }}>
+    <Box
+      component="img"
+      src="/kaamos-full.png"
+      alt="KAAMOS"
+      sx={{
+        height: 60,
+        width: 'auto',
+        margin: '-12px -8px -12px -4px',
+        objectFit: 'contain',
+        flexShrink: 0,
+      }}
+    />
+    {!compact && (
       <Box
         component="img"
-        src="/kaamos-logo.png"
+        src="/kaamos-wordmark.png"
         alt="KAAMOS"
         sx={{
-          height: compact ? 28 : 34,
+          height: 26,
           width: 'auto',
           objectFit: 'contain',
           flexShrink: 0,
         }}
       />
-      {!compact && (
-        <Typography
-          component="span"
-          sx={{
-            fontWeight: 700,
-            fontSize: '0.82rem',
-            letterSpacing: '0.16em',
-            color: theme.custom.textPrimary,
-            textTransform: 'uppercase',
-            fontFamily: "'Inter', sans-serif",
-          }}
-        >
-          KAAMOS
-        </Typography>
-      )}
-    </Box>
-  );
-};
+    )}
+  </Box>
+);

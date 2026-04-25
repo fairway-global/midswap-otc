@@ -38,7 +38,7 @@ const LANDING_CSS = `
 
 /* === TOP BANNER === */
 .klp .top-banner{position:absolute;top:0;left:0;right:0;z-index:50;display:flex;justify-content:center}
-.klp .top-banner-inner{min-width:1000px;margin:0 auto;border-radius:0 0 12px 12px;background:rgba(255,255,255,.06);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 24px;font-size:13px}
+.klp .top-banner-inner{width:min(1000px,calc(100vw - 24px));margin:0 auto;border-radius:0 0 12px 12px;background:rgba(255,255,255,.06);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;gap:12px;padding:10px 24px;font-size:13px}
 .klp .top-banner-text{color:rgba(255,255,255,.7)}
 .klp .top-banner-link{font-weight:500;color:var(--white);transition:opacity .2s;cursor:pointer}
 .klp .top-banner-link:hover{opacity:.8}
@@ -104,9 +104,9 @@ const LANDING_CSS = `
 .klp .stats-grid{display:grid;grid-template-columns:1fr;gap:48px;margin-bottom:80px}
 @media(min-width:1024px){.klp .stats-grid{grid-template-columns:1fr 1fr;gap:48px}}
 .klp .stat-block{position:relative;text-align:center}
-.klp .stat-bg-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:clamp(5rem,10vw,10rem);font-weight:300;color:rgba(255,255,255,.025);pointer-events:none;user-select:none}
+.klp .stat-bg-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--font-sans);font-size:clamp(5rem,10vw,10rem);font-weight:300;letter-spacing:-.02em;color:rgba(255,255,255,.025);pointer-events:none;user-select:none}
 .klp .stat-block .stat-label{font-size:12px;text-transform:uppercase;letter-spacing:.2em;color:rgba(255,255,255,.4);margin-bottom:24px}
-.klp .stat-value{font-size:clamp(2.5rem,5vw,4.5rem);font-weight:300;color:var(--white);position:relative}
+.klp .stat-value{font-family:var(--font-sans);font-size:clamp(2.5rem,5vw,4.5rem);font-weight:300;letter-spacing:-.02em;color:var(--white);position:relative}
 .klp .stat-desc{margin-top:16px;font-size:16px;color:rgba(255,255,255,.4);max-width:400px;margin-left:auto;margin-right:auto}
 
 /* Pillars */
@@ -117,32 +117,32 @@ const LANDING_CSS = `
 .klp .pillar-fig{font-size:12px;text-transform:uppercase;letter-spacing:.2em;color:rgba(255,255,255,.3);margin-bottom:32px}
 .klp .pillar-icon-area{display:flex;align-items:center;justify-content:center;height:120px;margin-bottom:32px}
 .klp .pillar-icon-area svg{width:64px;height:64px}
-.klp .pillar-title{font-size:16px;font-weight:600;color:var(--white);margin-bottom:8px}
+.klp .pillar-title{font-family:var(--font-sans);font-size:16px;font-weight:600;letter-spacing:-.01em;color:var(--white);margin-bottom:8px}
 .klp .pillar-desc{font-size:14px;color:rgba(255,255,255,.5);line-height:1.7}
 
 /* Bridge */
 .klp .section-bridge{margin-top:64px;display:flex;flex-direction:column;align-items:center}
 .klp .bridge-line{height:1px;width:128px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent)}
-.klp .bridge-text{margin-top:24px;font-size:20px;font-weight:300;color:var(--white)}
+.klp .bridge-text{margin-top:24px;font-family:var(--font-sans);font-size:20px;font-weight:300;letter-spacing:-.01em;color:var(--white)}
 
 /* === PRODUCT SECTION === */
 .klp .product-section{background:var(--bg);padding:0 0 16px;scroll-margin-top:48px}
 .klp .product-header{max-width:640px;margin-bottom:64px}
 .klp .section-tag{font-size:12px;text-transform:uppercase;letter-spacing:.2em;color:rgba(255,255,255,.4);margin-bottom:16px}
-.klp .section-title{font-size:clamp(1.8rem,3.5vw,3rem);font-weight:300;color:var(--white);margin-bottom:24px}
+.klp .section-title{font-family:var(--font-sans);font-size:clamp(1.8rem,3.5vw,3rem);font-weight:300;letter-spacing:-.02em;color:var(--white);margin-bottom:24px}
 .klp .section-desc{color:rgba(255,255,255,.5);line-height:1.7;font-size:15px}
 .klp .product-cards{display:grid;gap:1px;background:rgba(255,255,255,.04);border-radius:16px;overflow:hidden;margin-bottom:48px}
 @media(min-width:768px){.klp .product-cards{grid-template-columns:repeat(3,1fr)}}
 .klp .product-card{background:var(--bg-card);padding:40px;transition:background .3s}
 .klp .product-card:hover{background:var(--bg-card-hover)}
-.klp .product-card h3{font-size:17px;font-weight:500;color:var(--white);margin-bottom:12px}
+.klp .product-card h3{font-family:var(--font-sans);font-size:17px;font-weight:500;letter-spacing:-.01em;color:var(--white);margin-bottom:12px}
 .klp .product-card p{font-size:14px;color:rgba(255,255,255,.5);line-height:1.7}
 
 /* Vault Card */
 .klp .vault-card{margin-top:48px}
 .klp .vault-card-inner{border-radius:24px;border:1px solid rgba(255,255,255,.1);background:linear-gradient(180deg,rgba(255,255,255,0.04) 0%,var(--bg) 100%);overflow:hidden}
 .klp .vault-header{padding:32px 40px 24px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
-.klp .vault-name{font-size:clamp(1.5rem,3vw,2.2rem);font-weight:600;color:var(--white);letter-spacing:-.01em}
+.klp .vault-name{font-family:var(--font-sans);font-size:clamp(1.5rem,3vw,2.2rem);font-weight:600;color:var(--white);letter-spacing:-.01em}
 .klp .vault-subtitle{margin-top:8px;font-size:15px;color:rgba(255,255,255,.4)}
 .klp .vault-divider{margin:0 40px;height:1px;background:rgba(255,255,255,.08)}
 .klp .vault-params{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;padding:24px 40px}
@@ -150,7 +150,7 @@ const LANDING_CSS = `
 .klp .vault-param-label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--accent-glow);margin-bottom:6px}
 .klp .vault-param-value{font-size:14px;font-weight:500;color:var(--white)}
 .klp .vault-metrics{display:grid;grid-template-columns:repeat(3,1fr);padding:40px;text-align:center}
-.klp .vault-metric-value{font-size:clamp(1.5rem,3.5vw,3.2rem);font-weight:300;color:var(--accent);letter-spacing:-.01em}
+.klp .vault-metric-value{font-family:var(--font-sans);font-size:clamp(1.1rem,3.0vw,2.8rem);font-weight:300;color:var(--accent);letter-spacing:-.01em}
 .klp .vault-metric-label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:rgba(255,255,255,.4);margin-top:8px}
 
 /* === FEATURES SECTION === */
@@ -159,7 +159,7 @@ const LANDING_CSS = `
 .klp .features-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:24px;margin-bottom:80px;max-width:900px;margin-left:auto;margin-right:auto}
 @media(min-width:640px){.klp .features-stats{grid-template-columns:repeat(4,1fr);gap:48px}}
 .klp .feature-stat{text-align:center}
-.klp .feature-stat-value{font-size:clamp(1.8rem,3vw,2.8rem);font-weight:300;color:var(--white)}
+.klp .feature-stat-value{font-family:var(--font-sans);font-size:clamp(1.8rem,3vw,2.8rem);font-weight:300;letter-spacing:-.02em;color:var(--white)}
 .klp .feature-stat-label{margin-top:12px;font-size:13px;color:rgba(255,255,255,.4)}
 @media(min-width:640px){.klp .feature-stat+.feature-stat{border-left:1px solid var(--border)}}
 
@@ -169,7 +169,7 @@ const LANDING_CSS = `
 .klp .cta-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;z-index:0}
 .klp .cta-video-overlay{position:absolute;inset:0;background:rgba(0,0,0,0.6);z-index:1}
 .klp .cta-content{position:relative;z-index:3}
-.klp .cta-content h2{font-size:clamp(1.5rem,3vw,2.2rem);font-weight:300;color:var(--white);margin-bottom:20px}
+.klp .cta-content h2{font-family:var(--font-sans);font-size:clamp(1.5rem,3vw,2.2rem);font-weight:300;letter-spacing:-.02em;color:var(--white);margin-bottom:20px}
 .klp .cta-content p{max-width:520px;margin:0 auto 32px;color:rgba(255,255,255,.7);font-size:15px}
 
 /* === FAQ SECTION === */
@@ -198,13 +198,13 @@ const LANDING_CSS = `
 .klp .newsletter-section{background:var(--bg);padding:80px 0}
 .klp .newsletter-block{display:flex;flex-direction:column;gap:32px;max-width:1100px;margin:0 auto;align-items:center}
 @media(min-width:768px){.klp .newsletter-block{flex-direction:row;align-items:center;justify-content:space-between}}
-.klp .newsletter-tagline{font-size:clamp(1.1rem,1.8vw,1.35rem);font-weight:500;font-style:italic;color:var(--white);max-width:400px;line-height:1.4}
+.klp .newsletter-tagline{font-family:var(--font-sans);font-size:clamp(1.1rem,1.8vw,1.35rem);font-weight:500;font-style:italic;letter-spacing:-.01em;color:var(--white);max-width:400px;line-height:1.4}
 .klp .newsletter-form{width:100%;max-width:500px;padding:40px;border-radius:20px;background:rgba(255,255,255,.04)}
 .klp .newsletter-form-label{font-size:14px;font-weight:500;color:var(--white);margin-bottom:12px}
 .klp .newsletter-input-row{display:flex}
-.klp .newsletter-input-row input{flex:1;padding:12px 20px;border:none;border-right:1.5px solid var(--border);background:var(--bg);font-family:var(--font-sans);font-size:14px;color:var(--white);outline:none;border-radius:50px 0 0 50px}
+.klp .newsletter-input-row input{flex:1;padding:12px 20px;border:none;border-right:1.5px solid var(--border);background:var(--bg);font-family:var(--font-mono);font-size:13px;color:var(--white);outline:none;border-radius:50px 0 0 50px}
 .klp .newsletter-input-row input::placeholder{color:var(--text-dim)}
-.klp .newsletter-btn{background:var(--accent);color:var(--white);border:none;padding:12px 20px;font-family:var(--font-sans);font-size:14px;font-weight:500;border-radius:0 50px 50px 0;cursor:pointer;transition:background .2s}
+.klp .newsletter-btn{background:var(--accent);color:#000000;border:none;padding:12px 20px;font-family:var(--font-mono);font-size:13px;font-weight:600;border-radius:0 50px 50px 0;cursor:pointer;transition:background .2s}
 .klp .newsletter-btn:hover{background:#14B8A6}
 
 /* === FOOTER === */
@@ -212,7 +212,7 @@ const LANDING_CSS = `
 .klp .footer-inner{display:flex;flex-direction:column;gap:48px}
 @media(min-width:768px){.klp .footer-inner{flex-direction:row;justify-content:space-between}}
 .klp .footer-left{max-width:400px}
-.klp .footer-desc{margin:16px 0 40px;font-size:12px;color:var(--text-dim);line-height:1.6}
+.klp .footer-desc{margin:96px 0 40px;font-size:12px;color:var(--text-dim);line-height:1.6}
 .klp .footer-social{display:flex;gap:20px}
 .klp .social-link{color:rgba(255,255,255,.4);transition:color .2s}
 .klp .social-link:hover{color:var(--white)}

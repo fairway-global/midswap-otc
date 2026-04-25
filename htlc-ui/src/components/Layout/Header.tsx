@@ -73,7 +73,7 @@ export const Header: React.FC = () => {
         sx={{
           gap: { xs: 2, md: 3 },
           px: { xs: 2, md: 4 },
-          minHeight: { xs: 52, md: 60 },
+          minHeight: { xs: 56, md: 68 },
         }}
       >
         <Box component={RouterLink} to="/" sx={{ textDecoration: 'none', display: 'flex', alignItems: 'center' }}>
@@ -90,11 +90,11 @@ export const Header: React.FC = () => {
                 size="small"
                 sx={{
                   borderRadius: 1,
-                  px: 1.5,
-                  py: 0.75,
-                  fontSize: '0.72rem',
-                  letterSpacing: '0.02em',
-                  color: isActive(to) ? teal : alpha('#FFFFFF', 0.35),
+                  px: 1.75,
+                  py: 0.9,
+                  fontSize: '0.94rem',
+                  letterSpacing: '0.01em',
+                  color: isActive(to) ? teal : alpha('#FFFFFF', 0.7),
                   bgcolor: isActive(to) ? alpha(teal, 0.08) : 'transparent',
                   fontWeight: 500,
                   '&:hover': {
@@ -120,13 +120,13 @@ export const Header: React.FC = () => {
               <Stack direction="row" spacing={1} alignItems="center">
                 <Box
                   sx={{
-                    width: 26,
-                    height: 26,
+                    width: 32,
+                    height: 32,
                     borderRadius: '50%',
                     bgcolor: alpha(teal, 0.16),
                     color: teal,
                     fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: '0.66rem',
+                    fontSize: '0.78rem',
                     display: 'grid',
                     placeItems: 'center',
                     border: `1px solid ${alpha(teal, 0.3)}`,
@@ -139,8 +139,8 @@ export const Header: React.FC = () => {
                   size="small"
                   onClick={() => void onSignOut()}
                   sx={{
-                    fontSize: '0.66rem',
-                    color: alpha('#FFFFFF', 0.5),
+                    fontSize: '0.81rem',
+                    color: alpha('#FFFFFF', 0.6),
                     '&:hover': { color: theme.custom.danger, bgcolor: 'transparent' },
                   }}
                 >
@@ -153,7 +153,7 @@ export const Header: React.FC = () => {
                 variant="outlined"
                 color="primary"
                 onClick={() => void navigate('/login')}
-                sx={{ height: 30, fontSize: '0.7rem' }}
+                sx={{ height: 36, px: 2, fontSize: '0.81rem', fontWeight: 500 }}
               >
                 Sign in
               </Button>
@@ -169,17 +169,17 @@ export const Header: React.FC = () => {
               size="small"
               onClick={() => void navigate('/faucet')}
               sx={{
-                height: 30,
-                px: 1.5,
+                height: 36,
+                px: 2,
                 ml: 0.5,
                 borderRadius: 999,
                 border: `1px solid ${alpha(theme.custom.warning, 0.5)}`,
                 bgcolor: alpha(theme.custom.warning, 0.06),
                 color: theme.custom.warning,
                 fontFamily: 'JetBrains Mono, monospace',
-                fontSize: '0.7rem',
+                fontSize: '0.81rem',
                 fontWeight: 600,
-                letterSpacing: '0.08em',
+                letterSpacing: '0.06em',
                 textTransform: 'uppercase',
                 '&:hover': {
                   borderColor: theme.custom.warning,
@@ -239,10 +239,10 @@ export const Header: React.FC = () => {
                   sx={{
                     justifyContent: 'flex-start',
                     borderRadius: 1,
-                    px: 1.5,
-                    py: 0.75,
-                    fontSize: '0.72rem',
-                    color: isActive(to) ? teal : alpha('#FFFFFF', 0.35),
+                    px: 1.75,
+                    py: 1,
+                    fontSize: '0.94rem',
+                    color: isActive(to) ? teal : alpha('#FFFFFF', 0.7),
                     bgcolor: isActive(to) ? alpha(teal, 0.08) : 'transparent',
                   }}
                 >

@@ -119,14 +119,12 @@ export const LandingPage: React.FC = () => {
         <div className="hero-content"><div className="hero-text-block">
           <h1 className="hero-title" data-animate="fade-up">
             <span className="hero-rotating-wrapper"><span className="hero-rotating-text" ref={rotRef}>Zero Counterparty Risk.</span></span>
-              <span className="hero-static-text">
-                The OTC Rail for <span style={{ opacity: '0' }}></span> 
-                
-                <span style={{ color: '#2dd4bf' }}>Digital Assets.</span>
-              </span>
+            <span className="hero-static-text">
+              The OTC Rail for <span className="accent-text">Digital Assets.</span>
+            </span>
           </h1>
           <p className="hero-subtitle" data-animate="fade-up" data-delay="400">
-            Regulatory-compliant, direct institutional settlement across chains. Execute private, atomic token swaps between verified counterparties — with no custodian, no exchange, and zero counterparty risk.
+            Regulatory-compliant, direct institutional settlement across chains. Execute private, atomic token swaps between verified counterparties with no custodian, no exchange, and zero counterparty risk.
           </p>
           <div className="hero-actions" data-animate="fade-up" data-delay="700">
             <a href="#" className="btn btn-primary" onClick={goApp}>Launch App</a>
