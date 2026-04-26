@@ -22,9 +22,15 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
+  FormControl,
+  FormHelperText,
   IconButton,
   InputAdornment,
   Link,
+  ListSubheader,
+  MenuItem,
+  Select,
   Stack,
   TextField,
   Tooltip,
@@ -34,6 +40,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import SwapVertIcon from '@mui/icons-material/SwapVert';
 import CallMadeIcon from '@mui/icons-material/CallMade';
 import ContentPasteIcon from '@mui/icons-material/ContentPaste';
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import { alpha, useTheme } from '@mui/material/styles';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getAddressDetails } from '@lucid-evolution/lucid';
@@ -55,6 +62,27 @@ import { otcApi, type Rfq, type WalletSnapshot } from '../../api/orchestrator-cl
 import { rfqAmounts } from '../../api/swap-bridge';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
+
+/**
+ * Eligible counterparties — visual showcase of the regulatory framework
+ * Kaamos enforces at the protocol level. Only "open" is selectable on
+ * preprod; jurisdiction + license filters land with mainnet.
+ */
+type EligibilityOption = { value: string; label: string; sublabel?: string };
+const ELIGIBILITY_OPEN = 'open';
+const ELIGIBILITY_JURISDICTIONS: ReadonlyArray<EligibilityOption> = [
+  { value: 'eu', label: 'EU Regulated Institution' },
+  { value: 'ch', label: 'Swiss Regulated Institution' },
+  { value: 'uk', label: 'UK Regulated Institution' },
+  { value: 'whitelist', label: 'Approved Whitelist Only', sublabel: 'Manual KYB' },
+];
+const ELIGIBILITY_LICENSES: ReadonlyArray<EligibilityOption> = [
+  { value: 'finma', label: 'FINMA Bank / Securities Firm' },
+  { value: 'mica', label: 'EU MiCA CASP' },
+  { value: 'fca', label: 'UK FCA Cryptoasset Firm' },
+  { value: 'hk', label: 'HK SFC Type 1 / 7' },
+  { value: 'adgm', label: 'ADGM FSRA Licensed' },
+];
 
 const resolvePkh = (input: string): string | undefined => {
   const trimmed = input.trim();
@@ -142,6 +170,7 @@ export const SwapCard: React.FC = () => {
   // Maker-only local form.
   const [usdmAmount, setUsdmAmount] = useState('1');
   const [usdcAmount, setUsdcAmount] = useState('1');
+  const [eligibility, setEligibility] = useState<string>(ELIGIBILITY_OPEN);
   const [deadlineMin, setDeadlineMin] = useState(limits.aliceDefaultDeadlineMin.toString());
 
   // Forward-maker counterparty: Cardano address/PKH
@@ -871,6 +900,10 @@ export const SwapCard: React.FC = () => {
             </Alert>
           )}
 
+          {role === 'maker' && (
+            <EligibleCounterparties value={eligibility} onChange={setEligibility} />
+          )}
+
           <Box sx={{ mt: 2.5 }}>{cta}</Box>
         </Box>
 
@@ -1050,6 +1083,154 @@ const BoundBadge: React.FC<{ reference: string }> = ({ reference }) => {
         }}
       />
       bound · {reference}
+    </Box>
+  );
+};
+
+const EligibleCounterparties: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+  const theme = useTheme();
+  const isOpen = value === ELIGIBILITY_OPEN;
+
+  const subheaderSx = {
+    bgcolor: 'transparent',
+    color: theme.custom.textMuted,
+    fontFamily: 'JetBrains Mono, monospace',
+    fontSize: '0.6rem',
+    fontWeight: 600,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase' as const,
+    lineHeight: 1.6,
+    pt: 1.5,
+    pb: 0.5,
+  };
+
+  const soonChipSx = {
+    height: 16,
+    fontSize: '0.55rem',
+    fontWeight: 600,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+    bgcolor: alpha(theme.custom.teal, 0.08),
+    color: theme.custom.teal,
+    border: `1px solid ${alpha(theme.custom.teal, 0.25)}`,
+    borderRadius: '999px',
+    '& .MuiChip-label': { px: 0.7 },
+  };
+
+  const renderRow = (opt: EligibilityOption) => (
+    <MenuItem key={opt.value} value={opt.value} disabled sx={{ opacity: 0.55, py: 0.6 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ width: '100%' }}>
+        <Typography variant="body2" sx={{ flex: 1, color: theme.custom.textSecondary }}>
+          {opt.label}
+        </Typography>
+        {opt.sublabel && (
+          <Typography
+            variant="caption"
+            sx={{ color: theme.custom.textMuted, fontFamily: 'JetBrains Mono, monospace', fontSize: '0.62rem' }}
+          >
+            {opt.sublabel}
+          </Typography>
+        )}
+        <Chip label="Coming Soon" size="small" sx={soonChipSx} />
+      </Stack>
+    </MenuItem>
+  );
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <VerifiedUserIcon sx={{ fontSize: 12, color: theme.custom.textMuted }} />
+        <Typography
+          sx={{
+            fontSize: '0.64rem',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            color: theme.custom.textMuted,
+          }}
+        >
+          Eligible Counterparties
+        </Typography>
+      </Stack>
+      <FormControl fullWidth size="small">
+        <Select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          renderValue={(selected) => (
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: isOpen ? '#22c55e' : theme.custom.teal,
+                  boxShadow: `0 0 6px ${alpha(isOpen ? '#22c55e' : theme.custom.teal, 0.6)}`,
+                }}
+              />
+              <Typography variant="body2" sx={{ color: theme.custom.textPrimary }}>
+                {selected === ELIGIBILITY_OPEN
+                  ? 'Open · All Counterparties'
+                  : ([...ELIGIBILITY_JURISDICTIONS, ...ELIGIBILITY_LICENSES].find((o) => o.value === selected)?.label
+                      ?? 'Open · All Counterparties')}
+              </Typography>
+            </Stack>
+          )}
+          MenuProps={{
+            PaperProps: {
+              sx: {
+                mt: 0.5,
+                bgcolor: theme.custom.surface1,
+                border: `1px solid ${theme.custom.borderSubtle}`,
+                backgroundImage: 'none',
+              },
+            },
+          }}
+          sx={{
+            '& .MuiOutlinedInput-notchedOutline': {
+              borderColor: theme.custom.borderSubtle,
+            },
+            '&:hover .MuiOutlinedInput-notchedOutline': {
+              borderColor: alpha(theme.custom.teal, 0.4),
+            },
+          }}
+        >
+          <MenuItem value={ELIGIBILITY_OPEN} sx={{ py: 0.75 }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ width: '100%' }}>
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: '#22c55e',
+                  boxShadow: `0 0 6px ${alpha('#22c55e', 0.6)}`,
+                }}
+              />
+              <Typography variant="body2" sx={{ flex: 1, color: theme.custom.textPrimary }}>
+                Open · All Counterparties
+              </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: '#22c55e',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  fontSize: '0.6rem',
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Active
+              </Typography>
+            </Stack>
+          </MenuItem>
+          <ListSubheader sx={subheaderSx}>Jurisdiction</ListSubheader>
+          {ELIGIBILITY_JURISDICTIONS.map(renderRow)}
+          <ListSubheader sx={subheaderSx}>License Type</ListSubheader>
+          {ELIGIBILITY_LICENSES.map(renderRow)}
+        </Select>
+        <FormHelperText sx={{ mx: 0 }}>
+          Counterparty filtering enforced at the protocol level
+        </FormHelperText>
+      </FormControl>
     </Box>
   );
 };
