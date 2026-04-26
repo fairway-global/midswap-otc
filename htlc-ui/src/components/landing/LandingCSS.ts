@@ -172,6 +172,29 @@ const LANDING_CSS = `
 .klp .cta-content h2{font-family:var(--font-sans);font-size:clamp(1.5rem,3vw,2.2rem);font-weight:300;letter-spacing:-.02em;color:var(--white);margin-bottom:20px}
 .klp .cta-content p{max-width:520px;margin:0 auto 32px;color:rgba(255,255,255,.7);font-size:15px}
 
+/* === POWERED BY SECTION === */
+.klp .powered-section{background:var(--bg);padding:80px 0}
+.klp .powered-card{display:flex;flex-direction:column;gap:40px;border:1px solid rgba(255,255,255,.08);border-radius:20px;background:rgba(255,255,255,.02);overflow:hidden;padding:48px 40px;position:relative}
+@media(min-width:768px){.klp .powered-card{flex-direction:row;align-items:center;padding:56px 56px}}
+.klp .powered-left{flex:1;min-width:0}
+.klp .powered-title{font-family:var(--font-sans);font-size:clamp(1.6rem,3vw,2.4rem);font-weight:300;letter-spacing:-.02em;color:var(--white);display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.klp .powered-logo{height:60px;width:auto;display:inline-block}
+.klp .powered-desc{font-size:15px;line-height:1.7;color:rgba(255,255,255,.5);max-width:480px;margin-bottom:28px}
+.klp .powered-btn{display:inline-flex;align-items:center;gap:8px;padding:12px 28px;border-radius:8px;background:#3B82F6;color:var(--white);font-family:var(--font-mono);font-size:14px;font-weight:500;transition:all .2s;border:none;cursor:pointer}
+.klp .powered-btn:hover{background:#2563EB;transform:translateY(-1px)}
+.klp .powered-btn-arrow{transition:transform .2s}
+.klp .powered-btn:hover .powered-btn-arrow{transform:translateX(4px)}
+.klp .powered-right{flex:0 0 auto;display:flex;align-items:center;justify-content:center;position:relative;min-height:240px;min-width:240px}
+@media(min-width:768px){.klp .powered-right{min-height:300px;min-width:300px}}
+.klp .powered-globe{position:relative;width:260px;height:260px;display:flex;align-items:center;justify-content:center}
+@media(min-width:768px){.klp .powered-globe{width:320px;height:320px}}
+.klp .powered-globe-ring{position:absolute;border-radius:50%;border:1px solid rgba(255,255,255,.06);animation:klp-globe-spin 20s linear infinite}
+.klp .powered-globe-ring--1{width:100%;height:100%;border-color:rgba(255,255,255,.08)}
+.klp .powered-globe-ring--2{width:75%;height:75%;border-color:rgba(255,255,255,.05);animation-duration:15s;animation-direction:reverse}
+.klp .powered-globe-ring--3{width:50%;height:50%;border-color:rgba(255,255,255,.04);animation-duration:25s}
+.klp .powered-globe-logo{width:250px;height:180px;object-fit:contain;position:relative;z-index:2;filter:drop-shadow(0 0 40px rgba(45,212,191,.15))}
+@keyframes klp-globe-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+
 /* === FAQ SECTION === */
 .klp .faq-section{background:var(--bg);padding:80px 0 40px;scroll-margin-top:48px}
 .klp .faq-layout{display:flex;flex-direction:column;gap:48px;max-width:1000px;margin:0 auto;padding-top:80px;border-top:1px solid var(--border)}

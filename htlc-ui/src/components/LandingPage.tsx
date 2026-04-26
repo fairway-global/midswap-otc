@@ -255,6 +255,25 @@ export const LandingPage: React.FC = () => {
         </div>
       </div></section>
 
+      {/* Powered by Midnight */}
+      <section className="powered-section"><div className="container">
+        <div className="powered-card" data-animate="fade-up">
+          <div className="powered-left">
+            <h2 className="powered-title">Powered by <img src="/marquee-midnight-full.png" alt="Midnight" className="powered-logo" /></h2>
+            <p className="powered-desc">Kaamos is built on Midnight for trustless, privacy-preserving cross-chain settlement. ZK proofs. Confidential smart contracts. Institutional-grade compliance without surveillance.</p>
+            <a href="https://midnight.network" target="_blank" rel="noreferrer" className="powered-btn">Learn more <span className="powered-btn-arrow">→</span></a>
+          </div>
+          <div className="powered-right">
+            <div className="powered-globe">
+              <div className="powered-globe-ring powered-globe-ring--1" />
+              <div className="powered-globe-ring powered-globe-ring--2" />
+              <div className="powered-globe-ring powered-globe-ring--3" />
+              <img src="/kaamos-full.png" alt="Kaamos" className="powered-globe-logo" />
+            </div>
+          </div>
+        </div>
+      </div></section>
+
       {/* FAQ */}
       <section className="faq-section" id="faq"><div className="container"><div className="faq-layout">
         <div className="faq-header-col">
