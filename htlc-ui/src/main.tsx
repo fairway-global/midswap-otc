@@ -9,6 +9,7 @@ import { theme } from './config/theme';
 import '@midnight-ntwrk/dapp-connector-api';
 import * as pino from 'pino';
 import { AuthProvider } from './contexts/AuthContext';
+import { NotificationsProvider } from './contexts/NotificationsContext';
 import { SwapProvider } from './contexts/SwapContext';
 import { ToastProvider } from './contexts/ToastContext';
 
@@ -40,7 +41,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
       <ToastProvider>
         <SwapProvider logger={logger}>
           <AuthProvider>
-            <App />
+            <NotificationsProvider>
+              <App />
+            </NotificationsProvider>
           </AuthProvider>
         </SwapProvider>
       </ToastProvider>

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import type { Notifier } from './services/notifications.js';
+import { composeShareUrlParams } from './services/swap-bridge.js';
 import type {
   Activity,
   ActivityType,
@@ -99,13 +101,20 @@ export const openDatabase = (dbPath: string): Database.Database => {
 
 /**
  * The bridge surface the swap store calls when a `rfqId` is set on a
- * createSwap body or a `completed` patch arrives. Wired up by `openOtcStore`
- * and passed back into `openSwapStore` via `attachOtcBridge` so the swap
- * store stays decoupled from OTC concerns when the OTC store isn't loaded.
+ * createSwap body or a swap patch arrives. Wired up by `openOtcStore` and
+ * passed back into `openSwapStore` so the swap store stays decoupled from
+ * OTC concerns when the OTC store isn't loaded.
+ *
+ * `linkSwapToRfq` and `markRfqSettled` mutate RFQ state (status + activity).
+ * `onSwapStatusChange` is fire-and-forget — it exists so the OTC layer can
+ * fan out notifications on intermediate transitions (bob_deposited,
+ * alice_claimed, expired, *_reclaimed) without coupling the swap store to
+ * the notifier.
  */
 export interface SwapBridge {
-  linkSwapToRfq(rfqId: string, swapHash: string): void;
-  markRfqSettled(rfqId: string, swapHash: string): void;
+  linkSwapToRfq(rfqId: string, swap: Swap): void;
+  markRfqSettled(rfqId: string, swap: Swap): void;
+  onSwapStatusChange(rfqId: string, swap: Swap): void;
 }
 
 export const openSwapStore = (
@@ -311,10 +320,11 @@ export const openSwapStore = (
     const row = getStmt.get(body.hash);
     if (!row) throw new Error('insert succeeded but row not found');
 
+    const swap = rowToSwap(row);
     // Bridge: link to the RFQ and stamp it Settling.
     if (body.rfqId && bridge) {
       try {
-        bridge.linkSwapToRfq(body.rfqId, body.hash);
+        bridge.linkSwapToRfq(body.rfqId, swap);
       } catch (err) {
         // Bridge errors are non-fatal — the swap row already exists; the OTC
         // layer is advisory. Surface for observability without breaking the
@@ -322,7 +332,7 @@ export const openSwapStore = (
         console.error('[bridge] linkSwapToRfq failed', err);
       }
     }
-    return rowToSwap(row);
+    return swap;
   };
 
   const getStmt = db.prepare<[string], SwapRow>('SELECT * FROM swaps WHERE hash = ?');
@@ -397,14 +407,23 @@ export const openSwapStore = (
       if (result.changes === 0) return undefined;
       const updated = this.get(hash);
 
-      // Bridge propagation: if the swap completed and is RFQ-linked, the
-      // RFQ also needs to flip to Settled. Watchers tick swap status; this
-      // is the one transition that should bubble back up to the OTC layer.
-      if (updated && body.status === 'completed' && updated.rfqId && bridge) {
+      // Bridge propagation: notify the OTC layer of every status change on
+      // an RFQ-linked swap. `onSwapStatusChange` drives the bell fanout for
+      // intermediate transitions (bob_deposited, alice_claimed, expired,
+      // *_reclaimed). `markRfqSettled` is the one mutation — it flips the
+      // RFQ row to Settled and inserts the SETTLEMENT_COMPLETED activity.
+      if (updated && body.status && updated.rfqId && bridge) {
         try {
-          bridge.markRfqSettled(updated.rfqId, hash);
+          bridge.onSwapStatusChange(updated.rfqId, updated);
         } catch (err) {
-          console.error('[bridge] markRfqSettled failed', err);
+          console.error('[bridge] onSwapStatusChange failed', err);
+        }
+        if (body.status === 'completed') {
+          try {
+            bridge.markRfqSettled(updated.rfqId, updated);
+          } catch (err) {
+            console.error('[bridge] markRfqSettled failed', err);
+          }
         }
       }
       return updated;
@@ -683,7 +702,7 @@ export interface OtcStore extends SwapBridge {
   ): Activity;
 }
 
-export const openOtcStore = (db: Database.Database): OtcStore => {
+export const openOtcStore = (db: Database.Database, notifier?: Notifier): OtcStore => {
   // Schema — additive; CREATE IF NOT EXISTS so reruns are safe.
   db.exec(`
     CREATE TABLE IF NOT EXISTS otc_users (
@@ -1178,6 +1197,23 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         `Submitted quote @ ${input.price}`,
         id,
       );
+
+      // Bell fanout: originator gets a "new quote on your RFQ" notification.
+      // The quoter is the actor; nobody else needs to know.
+      if (notifier) {
+        const originator = this.getUserById(rfq.originatorId);
+        if (originator) {
+          notifier.notify({
+            recipientSupabaseIds: [originator.supabaseId],
+            rfqId: input.rfqId,
+            type: 'quote_submitted',
+            title: `New quote @ ${input.price}`,
+            body: `${provider.fullName} quoted on ${rfq.reference}.`,
+            link: `/rfq/${input.rfqId}`,
+          });
+        }
+      }
+
       const row = getQuoteStmt.get(id);
       if (!row) throw new Error('quote insert succeeded but row missing');
       return rowToQuote(row);
@@ -1253,6 +1289,26 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         `Countered @ ${input.price}`,
         id,
       );
+
+      // Bell fanout: notify the OTHER thread participant. If originator
+      // countered → notify the parent quote's provider; if provider countered
+      // → notify the originator. Self-counters can't happen (acceptance
+      // gating + thread membership above already enforces this).
+      if (notifier) {
+        const otherUserId = actor.id === rfq.originatorId ? parent.provider_id : rfq.originatorId;
+        const other = this.getUserById(otherUserId);
+        if (other) {
+          notifier.notify({
+            recipientSupabaseIds: [other.supabaseId],
+            rfqId: input.rfqId,
+            type: 'quote_countered',
+            title: `Counter @ ${input.price}`,
+            body: `${actor.fullName} countered on ${rfq.reference}.`,
+            link: `/rfq/${input.rfqId}`,
+          });
+        }
+      }
+
       const row = getQuoteStmt.get(id);
       if (!row) throw new Error('quote insert succeeded but row missing');
       return rowToQuote(row);
@@ -1330,6 +1386,24 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         `Accepted quote from ${quote.provider_name} @ ${quote.price}`,
         quoteId,
       );
+
+      // Bell fanout: tell the winning quoter. Losing quoters get a
+      // QUOTE_REJECTED notification via the implicit-reject status flip,
+      // but we don't fan out for them here — the cascade is silent.
+      if (notifier) {
+        const quoter = this.getUserById(quote.provider_id);
+        if (quoter) {
+          notifier.notify({
+            recipientSupabaseIds: [quoter.supabaseId],
+            rfqId,
+            type: 'quote_accepted',
+            title: 'Your quote was accepted',
+            body: `${rfq.originatorName} accepted your quote on ${rfq.reference}. Awaiting maker lock.`,
+            link: `/rfq/${rfqId}`,
+          });
+        }
+      }
+
       const updated = this.getRfq(rfqId);
       if (!updated) throw new Error('rfq missing after accept');
       return updated;
@@ -1354,6 +1428,22 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         `Rejected quote from ${quote.provider_name}`,
         quoteId,
       );
+
+      // Bell fanout: tell the rejected quoter so they don't keep waiting.
+      if (notifier) {
+        const quoter = this.getUserById(quote.provider_id);
+        if (quoter) {
+          notifier.notify({
+            recipientSupabaseIds: [quoter.supabaseId],
+            rfqId,
+            type: 'quote_rejected',
+            title: 'Quote rejected',
+            body: `${rfq.originatorName} rejected your quote on ${rfq.reference}.`,
+            link: `/rfq/${rfqId}`,
+          });
+        }
+      }
+
       const updated = this.getRfq(rfqId);
       if (!updated) throw new Error('rfq missing after reject');
       return updated;
@@ -1369,31 +1459,51 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
     },
 
     // ── SwapBridge (called by openSwapStore) ──
-    linkSwapToRfq(rfqId, swapHash) {
-      const rfq = getRfqStmt.get(rfqId);
-      if (!rfq) {
+    linkSwapToRfq(rfqId, swap) {
+      const rfqRow = getRfqStmt.get(rfqId);
+      if (!rfqRow) {
         // RFQ was deleted between accept and lock — orphaned swap, log and proceed.
-        console.warn('[bridge] linkSwapToRfq: rfq not found', { rfqId, swapHash });
+        console.warn('[bridge] linkSwapToRfq: rfq not found', { rfqId, swapHash: swap.hash });
         return;
       }
       const now = Date.now();
       db.prepare<[string, number, string]>(
         "UPDATE rfqs SET swap_hash = ?, status = 'Settling', updated_at = ? WHERE id = ?",
-      ).run(swapHash, now, rfqId);
+      ).run(swap.hash, now, rfqId);
       insertActivityImpl(
         rfqId,
         'SETTLEMENT_STARTED',
         'system',
         'system',
-        `Swap ${swapHash.slice(0, 12)}… submitted on-chain by maker.`,
+        `Swap ${swap.hash.slice(0, 12)}… submitted on-chain by maker.`,
       );
+
+      // Bell fanout: tell the selected counterparty their turn has started.
+      // Pre-compose the LP share URL server-side so the bell click lands
+      // them straight on the taker view of /swap with the existing reducer
+      // auto-starting — the literal answer to the user's complaint.
+      if (notifier && rfqRow.selected_provider_id) {
+        const provider = this.getUserById(rfqRow.selected_provider_id);
+        if (provider) {
+          const params = composeShareUrlParams(rowToRfq(rfqRow), swap);
+          notifier.notify({
+            recipientSupabaseIds: [provider.supabaseId],
+            rfqId,
+            type: 'settlement_started',
+            title: 'Counterparty locked — your turn',
+            body: `Maker has locked on ${rfqRow.reference}. Open the swap to settle.`,
+            link: `/swap?${params.toString()}`,
+            swapHash: swap.hash,
+          });
+        }
+      }
     },
 
-    markRfqSettled(rfqId, swapHash) {
-      const rfq = getRfqStmt.get(rfqId);
-      if (!rfq) return;
+    markRfqSettled(rfqId, swap) {
+      const rfqRow = getRfqStmt.get(rfqId);
+      if (!rfqRow) return;
       // Don't regress from a terminal state.
-      if (rfq.status === 'Settled') return;
+      if (rfqRow.status === 'Settled') return;
       const now = Date.now();
       db.prepare<[number, string]>(
         "UPDATE rfqs SET status = 'Settled', updated_at = ? WHERE id = ?",
@@ -1403,8 +1513,112 @@ export const openOtcStore = (db: Database.Database): OtcStore => {
         'SETTLEMENT_COMPLETED',
         'system',
         'system',
-        `Atomic swap ${swapHash.slice(0, 12)}… completed.`,
+        `Atomic swap ${swap.hash.slice(0, 12)}… completed.`,
       );
+
+      // Bell fanout: both parties get a settled notification.
+      if (notifier) {
+        const originator = this.getUserById(rfqRow.originator_id);
+        const provider = rfqRow.selected_provider_id
+          ? this.getUserById(rfqRow.selected_provider_id)
+          : undefined;
+        const recipients = [originator?.supabaseId, provider?.supabaseId].filter(
+          (s): s is string => Boolean(s),
+        );
+        if (recipients.length > 0) {
+          notifier.notify({
+            recipientSupabaseIds: recipients,
+            rfqId,
+            type: 'settlement_completed',
+            title: 'Swap settled',
+            body: `${rfqRow.reference} completed atomically.`,
+            link: `/rfq/${rfqId}`,
+            swapHash: swap.hash,
+          });
+        }
+      }
+    },
+
+    onSwapStatusChange(rfqId, swap) {
+      // Pure fanout — no DB mutation. Called for every status patch on an
+      // RFQ-linked swap. `open` / `completed` are owned by linkSwapToRfq /
+      // markRfqSettled respectively and are skipped here to avoid double
+      // notifications.
+      if (!notifier) return;
+      if (swap.status === 'open' || swap.status === 'completed') return;
+
+      const rfqRow = getRfqStmt.get(rfqId);
+      if (!rfqRow) return;
+
+      const originator = this.getUserById(rfqRow.originator_id);
+      const provider = rfqRow.selected_provider_id
+        ? this.getUserById(rfqRow.selected_provider_id)
+        : undefined;
+      const both = [originator?.supabaseId, provider?.supabaseId].filter(
+        (s): s is string => Boolean(s),
+      );
+
+      switch (swap.status) {
+        case 'bob_deposited':
+          // Counterparty completed second-chain action; originator's turn to claim.
+          if (originator) {
+            notifier.notify({
+              recipientSupabaseIds: [originator.supabaseId],
+              rfqId,
+              type: 'swap_bob_deposited',
+              title: 'Counterparty acted — your turn to claim',
+              body: `Open ${rfqRow.reference} to reveal the preimage and claim.`,
+              link: `/rfq/${rfqId}`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        case 'alice_claimed':
+          // Originator revealed preimage; counterparty can now claim.
+          if (provider) {
+            notifier.notify({
+              recipientSupabaseIds: [provider.supabaseId],
+              rfqId,
+              type: 'swap_alice_claimed',
+              title: 'Preimage revealed — claim ready',
+              body: `Maker claimed on ${rfqRow.reference}. Read the preimage and claim your side.`,
+              link: `/rfq/${rfqId}`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        case 'expired':
+          if (both.length > 0) {
+            notifier.notify({
+              recipientSupabaseIds: both,
+              rfqId,
+              type: 'swap_expired',
+              title: 'Swap expired',
+              body: `${rfqRow.reference} expired without settlement. Reclaim if you locked.`,
+              link: `/reclaim`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        case 'alice_reclaimed':
+        case 'bob_reclaimed':
+          if (both.length > 0) {
+            notifier.notify({
+              recipientSupabaseIds: both,
+              rfqId,
+              type: 'swap_reclaimed',
+              title: 'Funds reclaimed',
+              body: `${rfqRow.reference} was reclaimed by ${
+                swap.status === 'alice_reclaimed' ? 'the maker' : 'the taker'
+              }.`,
+              link: `/rfq/${rfqId}`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        default:
+          break;
+      }
     },
   };
 };

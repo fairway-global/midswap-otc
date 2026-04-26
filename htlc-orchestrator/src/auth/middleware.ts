@@ -1,7 +1,8 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import type { OtcStore } from '../db.js';
+import { supabaseAdmin, supabaseAdminEnabled } from '../lib/supabase-admin.js';
 import type { OtcUser } from '../types.js';
 
 declare module 'fastify' {
@@ -31,19 +32,14 @@ interface SupabaseAuthOptions {
  * paste-bundle flows continue to work.
  */
 const pluginImpl: FastifyPluginAsync<SupabaseAuthOptions> = async (app, { store }) => {
-    const url = process.env.SUPABASE_URL ?? '';
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-    const enabled = Boolean(url && key);
+    const enabled = supabaseAdminEnabled;
     if (!enabled) {
       app.log.warn(
         'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing — OTC auth disabled (legacy /api/swaps still served)',
       );
     }
 
-    const supabase = createClient(url || 'http://invalid', key || 'invalid', {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    app.decorate('supabase', supabase);
+    app.decorate('supabase', supabaseAdmin);
 
     app.decorateRequest('otcUser', undefined);
 
@@ -58,7 +54,7 @@ const pluginImpl: FastifyPluginAsync<SupabaseAuthOptions> = async (app, { store 
       const token = auth.slice('Bearer '.length).trim();
       if (!token) return reply.code(401).send({ error: 'auth_required' });
 
-      const { data, error } = await supabase.auth.getUser(token);
+      const { data, error } = await supabaseAdmin.auth.getUser(token);
       if (error || !data.user) {
         return reply.code(401).send({ error: 'invalid_session' });
       }

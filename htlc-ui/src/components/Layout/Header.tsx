@@ -14,6 +14,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import { alpha } from '@mui/material/styles';
 import { Logo } from './Logo';
+import { NotificationBell } from './NotificationBell';
 import { WalletMenu } from '../WalletMenu';
 import { useAuth, useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
@@ -159,6 +160,9 @@ export const Header: React.FC = () => {
               </Button>
             )
           )}
+
+          {/* Bell — only renders for signed-in users (NotificationBell self-gates). */}
+          <NotificationBell />
 
           <WalletMenu />
 

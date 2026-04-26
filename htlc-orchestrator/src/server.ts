@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth.js';
 import { quotesRoutes } from './routes/quotes.js';
 import { rfqsRoutes } from './routes/rfqs.js';
 import { swapsRoutes } from './routes/swaps.js';
+import { createNotifier } from './services/notifications.js';
 import {
   resolveStuckAlerterConfig,
   startStuckAlerter,
@@ -24,18 +25,21 @@ const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const DB_PATH = process.env.DB_PATH ?? resolve(process.cwd(), 'swaps.db');
 
-// One Database connection shared by both stores so the OTC bridge updates
-// (linkSwapToRfq / markRfqSettled) and the swap watchers see the same WAL.
-const db = openDatabase(DB_PATH);
-const otcStore = openOtcStore(db);
-const store = openSwapStore(db, otcStore);
-
 const app = Fastify({
   logger: {
     level: process.env.LOG_LEVEL ?? 'info',
     transport: { target: 'pino-pretty', options: { colorize: true } },
   },
 });
+
+// One Database connection shared by both stores so the OTC bridge updates
+// (linkSwapToRfq / markRfqSettled) and the swap watchers see the same WAL.
+// The notifier writes to Supabase Postgres (NOT this DB) for Realtime fanout;
+// it's fire-and-forget so disabled-Supabase environments still work.
+const db = openDatabase(DB_PATH);
+const notifier = createNotifier(app.log);
+const otcStore = openOtcStore(db, notifier);
+const store = openSwapStore(db, otcStore);
 
 const DEFAULT_ORIGINS = [
   'http://localhost:5199',
@@ -98,6 +102,10 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 try {
   await app.listen({ host: HOST, port: PORT });
   app.log.info({ db: DB_PATH }, 'orchestrator ready');
+  // Fire-and-forget — startup probe for the Supabase notifications table.
+  // Logs a loud banner if the SQL migration hasn't been applied. Doesn't
+  // block startup either way.
+  void notifier.probe();
 } catch (err) {
   app.log.error(err);
   process.exit(1);
