@@ -75,6 +75,7 @@ const App: React.FC = () => (
               <Route path="/mint-usdc" element={<Navigate to="/faucet?token=USDC" replace />} />
               <Route path="/mint-usdm" element={<Navigate to="/faucet?token=USDM" replace />} />
               <Route path="/how-to" element={<Navigate to="/how" replace />} />
+              <Route path="/how-it-works" element={<Navigate to="/how" replace />} />
               <Route path="/dashboard" element={<Navigate to="/activity" replace />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

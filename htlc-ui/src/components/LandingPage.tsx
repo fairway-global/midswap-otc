@@ -79,6 +79,7 @@ export const LandingPage: React.FC = () => {
   }, []);
 
   const goApp = (e: React.MouseEvent) => { e.preventDefault(); navigate('/app'); };
+  const goHow = (e: React.MouseEvent) => { e.preventDefault(); navigate('/how'); };
   const marqueeItems = [...MARQUEE_LOGOS,...MARQUEE_LOGOS,...MARQUEE_LOGOS];
   const marquee = marqueeItems.map((item,i) => 
     item.type === 'img' 
@@ -128,7 +129,7 @@ export const LandingPage: React.FC = () => {
           </p>
           <div className="hero-actions" data-animate="fade-up" data-delay="700">
             <a href="#" className="btn btn-primary" onClick={goApp}>Launch App</a>
-            <a href="/how-it-works" className="btn btn-ghost" target="_blank" rel="noreferrer">How it Works</a>
+            <a href="/how" className="btn btn-ghost" onClick={goHow}>How it Works</a>
           </div>
         </div></div>
         <div className="hero-partners"><div className="marquee"><div className="marquee-track">{marquee}</div></div></div>
