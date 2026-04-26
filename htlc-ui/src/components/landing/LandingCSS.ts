@@ -179,6 +179,24 @@ const LANDING_CSS = `
 .klp .faq-header-col{flex:0 0 40%}
 @media(min-width:1024px){.klp .faq-header-col{position:sticky;top:120px}}
 .klp .faq-heading{font-family:var(--font-sans);font-size:clamp(1.5rem,3vw,2.5rem);font-weight:300;color:var(--white)}
+.klp .faq-lore{position:relative;margin:36px 0 0;padding:22px 22px 20px;max-width:440px;background:linear-gradient(165deg,rgba(124,58,237,.06) 0%,rgba(45,212,191,.025) 45%,rgba(0,0,0,0) 100%);border:1px solid rgba(255,255,255,.06);border-radius:2px;overflow:hidden;isolation:isolate}
+.klp .faq-lore::before{content:'';position:absolute;inset:0;background:radial-gradient(120% 60% at 0% 0%,rgba(45,212,191,.08),transparent 60%);pointer-events:none;z-index:-1}
+.klp .faq-lore-aurora{position:absolute;left:-20%;right:-20%;top:-1px;height:1px;background:linear-gradient(90deg,transparent 0%,rgba(124,58,237,.4) 25%,rgba(45,212,191,.85) 50%,rgba(6,182,212,.5) 70%,transparent 100%);filter:blur(.3px);box-shadow:0 0 12px rgba(45,212,191,.35);pointer-events:none}
+.klp .faq-lore-corner{position:absolute;width:10px;height:10px;border-color:var(--accent);border-style:solid;border-width:0;opacity:.7;pointer-events:none}
+.klp .faq-lore-corner--tl{top:6px;left:6px;border-top-width:1px;border-left-width:1px}
+.klp .faq-lore-corner--tr{top:6px;right:6px;border-top-width:1px;border-right-width:1px}
+.klp .faq-lore-corner--bl{bottom:6px;left:6px;border-bottom-width:1px;border-left-width:1px}
+.klp .faq-lore-corner--br{bottom:6px;right:6px;border-bottom-width:1px;border-right-width:1px}
+.klp .faq-lore-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.klp .faq-lore-tag{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+.klp .faq-lore-glyph{width:14px;height:14px;color:var(--accent);flex-shrink:0}
+.klp .faq-lore-rule{flex:1;height:1px;background:linear-gradient(90deg,rgba(45,212,191,.45),transparent);opacity:.8}
+.klp .faq-lore-text{position:relative;margin:0 0 14px;padding:0;border:none;font-family:var(--font-mono);font-size:13px;line-height:1.78;color:rgba(255,255,255,.62);letter-spacing:.005em}
+.klp .faq-lore-quote{position:absolute;top:-14px;left:-4px;font-family:var(--font-sans);font-size:42px;line-height:1;color:var(--accent);opacity:.35;pointer-events:none;user-select:none}
+.klp .faq-lore-accent{color:var(--accent);font-style:italic;font-weight:500}
+.klp .faq-lore-caption{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.32)}
+.klp .faq-lore-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px rgba(45,212,191,.7);animation:klp-lore-pulse 3.2s ease-in-out infinite}
+@keyframes klp-lore-pulse{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:1;transform:scale(1.15)}}
 .klp .faq-list-col{flex:1}
 .klp .faq-item{border-bottom:2px solid rgba(255,255,255,.04);margin-bottom:4px}
 .klp .faq-question{display:flex;align-items:center;padding:24px 16px;background:none;border:none;cursor:pointer;width:100%;text-align:left;color:var(--white);font-family:inherit}

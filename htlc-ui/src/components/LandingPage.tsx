@@ -128,7 +128,7 @@ export const LandingPage: React.FC = () => {
           </p>
           <div className="hero-actions" data-animate="fade-up" data-delay="700">
             <a href="#" className="btn btn-primary" onClick={goApp}>Launch App</a>
-            <a href="https://github.com/kaleababayneh/midswap-otc" className="btn btn-ghost" target="_blank" rel="noreferrer">Read the Docs</a>
+            <a href="/how-it-works" className="btn btn-ghost" target="_blank" rel="noreferrer">How it Works</a>
           </div>
         </div></div>
         <div className="hero-partners"><div className="marquee"><div className="marquee-track">{marquee}</div></div></div>
@@ -256,7 +256,31 @@ export const LandingPage: React.FC = () => {
 
       {/* FAQ */}
       <section className="faq-section" id="faq"><div className="container"><div className="faq-layout">
-        <div className="faq-header-col"><h2 className="faq-heading">Frequently Asked<br/>Questions</h2></div>
+        <div className="faq-header-col">
+          <h2 className="faq-heading">Frequently Asked<br/>Questions</h2>
+          <figure className="faq-lore" data-animate="fade-up" data-delay="200">
+            <span className="faq-lore-aurora" aria-hidden="true" />
+            <span className="faq-lore-corner faq-lore-corner--tl" aria-hidden="true" />
+            <span className="faq-lore-corner faq-lore-corner--tr" aria-hidden="true" />
+            <span className="faq-lore-corner faq-lore-corner--bl" aria-hidden="true" />
+            <span className="faq-lore-corner faq-lore-corner--br" aria-hidden="true" />
+            <header className="faq-lore-header">
+              <span className="faq-lore-tag">
+                <svg className="faq-lore-glyph" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M2 11 Q5 4 8 8 T14 5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity=".9"/>
+                  <path d="M2 13 Q5 7 8 10 T14 8" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity=".5"/>
+                  <circle cx="13.5" cy="2.5" r=".9" fill="currentColor" opacity=".8"/>
+                </svg>
+                Etymology · 65°N
+              </span>
+              <span className="faq-lore-rule" aria-hidden="true" />
+            </header>
+            <div className="">
+              <span className="faq-lore-quote" aria-hidden="true">“</span>
+              Kaamos takes its name from the Finnish <em className="faq-lore-accent">polar night</em>, the Arctic winter when the sun stays below the horizon and the sky is lit by the <em className="faq-lore-accent">aurora borealis</em>. It reflects the northern spirit: sovereign, secure, and resilient, yet commerce and daily life continue unrelentingly through the deepest darkness.
+            </div>
+          </figure>
+        </div>
         <div className="faq-list-col">
           {[
             {q:'What is Kaamos?',a:'Kaamos is the institutional OTC settlement rail for cross-chain digital assets. Regulated counterparties atomically swap USDM on Cardano for USDC on Midnight using hash-time-locked contracts — bilateral settlement with cryptographic finality, without an exchange, custodian, or bridge in the middle.'},
