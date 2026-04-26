@@ -1227,7 +1227,7 @@ const EligibleCounterparties: React.FC<{ value: string; onChange: (v: string) =>
           <ListSubheader sx={subheaderSx}>License Type</ListSubheader>
           {ELIGIBILITY_LICENSES.map(renderRow)}
         </Select>
-        <FormHelperText sx={{ mx: 0 }}>
+        <FormHelperText sx={{ mx: 0, color: theme.custom.textMuted }}>
           Counterparty filtering enforced at the protocol level
         </FormHelperText>
       </FormControl>
