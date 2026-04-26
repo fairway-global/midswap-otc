@@ -41,6 +41,9 @@ export type ReverseMakerStep =
       midnightDeadlineMs: bigint;
       usdmAmount: bigint;
       usdcAmount: bigint;
+      /** Midnight deposit tx hash. Undefined when Lace's submit-wrapper
+       *  threw but the tx still landed (Landmine #5) — UI shows "—". */
+      depositTxHash?: string;
     }
   | {
       kind: 'waiting-cardano';
@@ -49,6 +52,7 @@ export type ReverseMakerStep =
       midnightDeadlineMs: bigint;
       usdmAmount: bigint;
       usdcAmount: bigint;
+      depositTxHash?: string;
     }
   | {
       kind: 'claim-ready';
@@ -58,6 +62,7 @@ export type ReverseMakerStep =
       usdmAmount: bigint;
       usdcAmount: bigint;
       cardanoHtlc: CardanoHTLCInfo;
+      depositTxHash?: string;
     }
   | {
       kind: 'claiming';
@@ -67,6 +72,7 @@ export type ReverseMakerStep =
       usdmAmount: bigint;
       usdcAmount: bigint;
       cardanoHtlc: CardanoHTLCInfo;
+      depositTxHash?: string;
     }
   | {
       kind: 'done';
@@ -131,6 +137,8 @@ interface PersistedSwap {
   midnightDeadlineMs: string;
   usdmAmount: string;
   usdcAmount: string;
+  /** Optional — survives page reload so the progress modal keeps the link. */
+  depositTxHash?: string;
 }
 
 const savePending = (cpk: string, swap: PersistedSwap): void => {
@@ -211,6 +219,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         // Legacy restore: pre-USDM records stored the amount as `adaAmount`.
         usdmAmount: BigInt(pending.usdmAmount ?? (pending as unknown as { adaAmount: string }).adaAmount),
         usdcAmount: BigInt(pending.usdcAmount),
+        depositTxHash: pending.depositTxHash,
       },
     });
     setRestoreNotice(
@@ -387,15 +396,16 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
         midnightDeadlineMs: midnightDeadlineMs.toString(),
         usdmAmount: params.usdmAmount.toString(),
         usdcAmount: params.usdcAmount.toString(),
+        depositTxHash,
       });
 
       // Register the reverse swap with the orchestrator. bobPkh is the
       // MAKER's own Cardano PKH — the receiver that the future taker lock
       // will bind to. bobCpk/bobUnshielded are the TAKER's Midnight keys
       // (known via the paste-bundle we just used as receiverAuth/payout).
-      // When the submit-wrapper failed, we don't have the deposit tx hash,
-      // but the on-chain entry is what matters — pass a hash-derived stand-in
-      // so the orchestrator record still exists for the taker to key on.
+      // When the submit-wrapper failed (Landmine #5) we omit midnightDepositTx
+      // entirely — the orchestrator schema is now optional for usdc-usdm. The
+      // on-chain entry is what matters; the tx hash is a display nicety.
       void tryOrchestrator(
         () =>
           orchestratorClient.createSwap({
@@ -406,7 +416,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
             usdmAmount: params.usdmAmount.toString(),
             usdcAmount: params.usdcAmount.toString(),
             midnightDeadlineMs: Number(midnightDeadlineMs),
-            midnightDepositTx: depositTxHash ?? `pending:${hashHex}`,
+            ...(depositTxHash ? { midnightDepositTx: depositTxHash } : {}),
             bobCpk: bytesToHex(params.counterpartyCpkBytes),
             bobUnshielded: bytesToHex(params.counterpartyUnshieldedBytes),
             bobPkh: cardano.paymentKeyHash,
@@ -424,6 +434,7 @@ export const useReverseMakerFlow = (): UseReverseMakerFlow => {
           midnightDeadlineMs,
           usdmAmount: params.usdmAmount,
           usdcAmount: params.usdcAmount,
+          depositTxHash,
         },
       });
     },

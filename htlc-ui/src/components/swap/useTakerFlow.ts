@@ -32,10 +32,10 @@ export type TakerStep =
   | { kind: 'confirm'; url: URLInputs; htlcInfo: CardanoHTLCInfo; bobDeadlineSecs: bigint; truncated: boolean }
   | { kind: 'unsafe-deadline'; url: URLInputs; htlcInfo: CardanoHTLCInfo; reason: string }
   | { kind: 'depositing'; url: URLInputs; htlcInfo: CardanoHTLCInfo; bobDeadlineSecs: bigint }
-  | { kind: 'waiting-preimage'; url: URLInputs; htlcInfo: CardanoHTLCInfo }
-  | { kind: 'claim-ready'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string }
-  | { kind: 'claiming'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string }
-  | { kind: 'done'; url: URLInputs; htlcInfo: CardanoHTLCInfo; claimTxHash: string }
+  | { kind: 'waiting-preimage'; url: URLInputs; htlcInfo: CardanoHTLCInfo; depositTxHash?: string }
+  | { kind: 'claim-ready'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string; depositTxHash?: string }
+  | { kind: 'claiming'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string; depositTxHash?: string }
+  | { kind: 'done'; url: URLInputs; htlcInfo: CardanoHTLCInfo; claimTxHash: string; depositTxHash?: string }
   | { kind: 'error'; message: string; url?: URLInputs };
 
 type TakerAction =
@@ -43,7 +43,7 @@ type TakerAction =
   | { t: 'lock-seen'; htlcInfo: CardanoHTLCInfo; bobDeadlineSecs: bigint; truncated: boolean }
   | { t: 'unsafe'; reason: string; htlcInfo: CardanoHTLCInfo }
   | { t: 'to-depositing' }
-  | { t: 'to-waiting-preimage' }
+  | { t: 'to-waiting-preimage'; depositTxHash?: string }
   | { t: 'preimage-seen'; preimageHex: string }
   | { t: 'to-claiming' }
   | { t: 'to-done'; claimTxHash: string }
@@ -79,19 +79,42 @@ const reducer = (state: TakerStep, action: TakerAction): TakerStep => {
         : state;
     case 'to-waiting-preimage':
       return state.kind === 'depositing'
-        ? { kind: 'waiting-preimage', url: state.url, htlcInfo: state.htlcInfo }
+        ? {
+            kind: 'waiting-preimage',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            depositTxHash: action.depositTxHash,
+          }
         : state;
     case 'preimage-seen':
       return state.kind === 'waiting-preimage'
-        ? { kind: 'claim-ready', url: state.url, htlcInfo: state.htlcInfo, preimageHex: action.preimageHex }
+        ? {
+            kind: 'claim-ready',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            preimageHex: action.preimageHex,
+            depositTxHash: state.depositTxHash,
+          }
         : state;
     case 'to-claiming':
       return state.kind === 'claim-ready'
-        ? { kind: 'claiming', url: state.url, htlcInfo: state.htlcInfo, preimageHex: state.preimageHex }
+        ? {
+            kind: 'claiming',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            preimageHex: state.preimageHex,
+            depositTxHash: state.depositTxHash,
+          }
         : state;
     case 'to-done':
       return state.kind === 'claiming'
-        ? { kind: 'done', url: state.url, htlcInfo: state.htlcInfo, claimTxHash: action.claimTxHash }
+        ? {
+            kind: 'done',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            claimTxHash: action.claimTxHash,
+            depositTxHash: state.depositTxHash,
+          }
         : state;
     case 'error':
       return { kind: 'error', message: action.message, url: 'url' in state ? state.url : undefined };
@@ -278,9 +301,10 @@ export const useTakerFlow = (): UseTakerFlow => {
       const bobUnshieldedBytes = session.bootstrap.unshieldedAddressBytes;
       const usdcColor = hexToBytes(swapState.usdcColor);
 
+      let depositTxHash: string | undefined;
       let submitError: unknown;
       try {
-        await session.htlcApi.deposit({
+        depositTxHash = await session.htlcApi.deposit({
           color: usdcColor,
           amount: state.url.usdcAmount,
           hash: hashBytes,
@@ -336,10 +360,11 @@ export const useTakerFlow = (): UseTakerFlow => {
             bobUnshielded: session.bootstrap.unshieldedAddressHex,
             bobPkh: cardano?.paymentKeyHash,
             midnightDeadlineMs: Number(state.bobDeadlineSecs) * 1000,
+            ...(depositTxHash ? { midnightDepositTx: depositTxHash } : {}),
           }),
         'patchSwap bob_deposited',
       );
-      dispatch({ t: 'to-waiting-preimage' });
+      dispatch({ t: 'to-waiting-preimage', depositTxHash });
     })();
   }, [state, session, cardano, swapState.usdcColor, toast]);
 

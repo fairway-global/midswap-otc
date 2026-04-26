@@ -132,11 +132,20 @@ const buildForwardMakerPhases = (
     {
       id: 'claim',
       title: 'Claim USDC on Midnight',
-      subtitle: afterClaim
-        ? `Received ${state.kind === 'done' ? state.depositAmount.toString() : ''} USDC.`
-        : afterDeposit
-          ? 'Counterparty deposited — you can claim now. Claiming reveals the preimage on Midnight.'
-          : 'Waits for the counterparty deposit to appear on Midnight.',
+      subtitle: afterClaim ? (
+        <Stack spacing={0.25}>
+          <Typography variant="caption">
+            Received {state.kind === 'done' ? state.depositAmount.toString() : ''} USDC.
+          </Typography>
+          {state.kind === 'done' && state.claimTxHash && (
+            <Typography variant="caption">Claim tx: {txLink('midnight', state.claimTxHash)}</Typography>
+          )}
+        </Stack>
+      ) : afterDeposit ? (
+        'Counterparty deposited — you can claim now. Claiming reveals the preimage on Midnight.'
+      ) : (
+        'Waits for the counterparty deposit to appear on Midnight.'
+      ),
       status: state.kind === 'claiming' ? 'active' : afterClaim ? 'done' : afterDeposit ? 'active' : 'pending',
       action:
         state.kind === 'claim-ready' ? (
@@ -206,7 +215,19 @@ const buildForwardTakerPhases = (
       id: 'deposit',
       title: 'Deposit USDC on Midnight',
       subtitle: afterDeposit
-        ? 'Deposited. Your USDC is escrowed until the maker claims or your deadline passes.'
+        ? (() => {
+            const depositTx = (state as Extract<TakerStep, { depositTxHash?: string }>).depositTxHash;
+            return (
+              <Stack spacing={0.25}>
+                <Typography variant="caption">
+                  Deposited. Your USDC is escrowed until the maker claims or your deadline passes.
+                </Typography>
+                {depositTx && (
+                  <Typography variant="caption">Deposit tx: {txLink('midnight', depositTx)}</Typography>
+                )}
+              </Stack>
+            );
+          })()
         : state.kind === 'depositing'
           ? 'Sign in your Midnight wallet.'
           : state.kind === 'confirm'
@@ -296,7 +317,16 @@ const buildReverseMakerPhases = (
   if (state.kind === 'depositing') {
     depositSubtitle = 'Please sign in your Midnight wallet.';
   } else if (hasDepositInfo) {
-    depositSubtitle = `Deposit expires ${new Date(Number(state.midnightDeadlineMs)).toLocaleString()}.`;
+    depositSubtitle = (
+      <Stack spacing={0.25}>
+        <Typography variant="caption">
+          Deposit expires {new Date(Number(state.midnightDeadlineMs)).toLocaleString()}.
+        </Typography>
+        {state.depositTxHash && (
+          <Typography variant="caption">Deposit tx: {txLink('midnight', state.depositTxHash)}</Typography>
+        )}
+      </Stack>
+    );
   } else if (state.kind === 'done') {
     depositSubtitle = 'USDC deposit done.';
   }

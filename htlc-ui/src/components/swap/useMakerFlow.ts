@@ -67,7 +67,16 @@ export type MakerStep =
       depositAmount: bigint;
       depositColorHex: string;
     }
-  | { kind: 'done'; hashHex: string; lockTxHash: string; usdmAmount: bigint; depositAmount: bigint }
+  | {
+      kind: 'done';
+      hashHex: string;
+      lockTxHash: string;
+      usdmAmount: bigint;
+      depositAmount: bigint;
+      /** Midnight withdraw tx hash. Undefined when Lace's submit-wrapper
+       *  threw but the claim still landed (Landmine #5). */
+      claimTxHash?: string;
+    }
   | { kind: 'error'; message: string };
 
 type MakerAction =
@@ -77,7 +86,7 @@ type MakerAction =
   | { t: 'to-waiting' }
   | { t: 'deposit-seen'; depositAmount: bigint; depositColorHex: string }
   | { t: 'to-claiming' }
-  | { t: 'to-done'; depositAmount: bigint }
+  | { t: 'to-done'; depositAmount: bigint; claimTxHash?: string }
   | { t: 'error'; message: string }
   | { t: 'reset' };
 
@@ -110,6 +119,7 @@ const reducer = (state: MakerStep, action: MakerAction): MakerStep => {
             lockTxHash: state.lockTxHash,
             usdmAmount: state.usdmAmount,
             depositAmount: action.depositAmount,
+            claimTxHash: action.claimTxHash,
           }
         : state;
     case 'error':
@@ -431,9 +441,10 @@ export const useMakerFlow = (): UseMakerFlow => {
       // Lace's submitTransaction sometimes throws "Request timed out" even when
       // the tx lands on-chain (Landmine #5). Before failing, verify the claim
       // by watching `revealedPreimages[hash]` on the Midnight indexer.
+      let claimTxHash: string | undefined;
       let submitError: unknown;
       try {
-        await session.htlcApi.withdrawWithPreimage(preimage);
+        claimTxHash = await session.htlcApi.withdrawWithPreimage(preimage);
       } catch (e) {
         submitError = e;
         console.warn('[useMakerFlow:claim] submit surfaced error; verifying on-chain', e);
@@ -470,11 +481,12 @@ export const useMakerFlow = (): UseMakerFlow => {
           orchestratorClient.patchSwap(state.hashHex, {
             status: 'alice_claimed',
             midnightPreimage: state.preimageHex,
+            ...(claimTxHash ? { midnightClaimTx: claimTxHash } : {}),
           }),
         'patchSwap alice_claimed',
       );
       clearPending(session.bootstrap.coinPublicKeyHex);
-      dispatch({ t: 'to-done', depositAmount: state.depositAmount });
+      dispatch({ t: 'to-done', depositAmount: state.depositAmount, claimTxHash });
     } catch (e) {
       console.error('[useMakerFlow:claim]', e);
       const msg = describeError(e);

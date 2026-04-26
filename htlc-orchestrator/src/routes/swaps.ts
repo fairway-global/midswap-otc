@@ -56,12 +56,18 @@ const validateCreateBody = (body: unknown): CreateSwapBody | string => {
   } else {
     // Maker has done the Midnight deposit at creation time.
     if (!isPosInt(b.midnightDeadlineMs)) return 'midnightDeadlineMs required for usdc-ada (integer ms)';
-    if (!isNonEmptyString(b.midnightDepositTx)) return 'midnightDepositTx required for usdc-ada';
+    // midnightDepositTx is OPTIONAL — Lace's submit-wrapper sometimes throws
+    // even when the tx lands on-chain (Landmine #5). The maker verifies the
+    // entry via the indexer and continues without a hash; the on-chain entry
+    // is what the watcher needs, the hash is a display nicety.
+    if (b.midnightDepositTx !== undefined && !isNonEmptyString(b.midnightDepositTx)) {
+      return 'midnightDepositTx, if provided, must be a non-empty string';
+    }
     if (!isHex(b.bobCpk)) return 'bobCpk required for usdc-ada (taker Midnight coin key, hex)';
     if (!isNonEmptyString(b.bobUnshielded)) return 'bobUnshielded required for usdc-ada (taker Midnight unshielded)';
     if (!isPkh(b.bobPkh)) return 'bobPkh required for usdc-ada (maker OWN Cardano PKH, 56 hex)';
     out.midnightDeadlineMs = b.midnightDeadlineMs;
-    out.midnightDepositTx = b.midnightDepositTx;
+    if (b.midnightDepositTx) out.midnightDepositTx = b.midnightDepositTx;
     out.bobCpk = b.bobCpk.toLowerCase();
     out.bobUnshielded = b.bobUnshielded;
     out.bobPkh = b.bobPkh.toLowerCase();

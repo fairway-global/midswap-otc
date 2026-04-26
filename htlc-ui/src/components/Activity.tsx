@@ -125,7 +125,10 @@ export const Activity: React.FC = () => {
   }, [swaps, nowMs]);
 
   const txLink = (chain: 'midnight' | 'cardano', hash: string | null): React.ReactNode => {
-    if (!hash)
+    // Legacy reverse-maker rows wrote `pending:<hashHex>` as a placeholder
+    // when Lace's submit-wrapper threw despite the tx landing (Landmine #5).
+    // Treat as missing — newer code passes the real tx hash or omits the field.
+    if (!hash || hash.startsWith('pending:'))
       return (
         <Typography sx={{ color: theme.custom.textMuted, fontSize: '0.68rem' }}>
           —
