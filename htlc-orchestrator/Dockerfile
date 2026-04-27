@@ -43,6 +43,12 @@ COPY htlc-orchestrator/package.json ./htlc-orchestrator/
 # orchestrator dependencies; the only extra cost is @types/* packages, ~10MB).
 RUN npm ci
 
+# libsodium-wrappers-sumo imports this file by relative path, but the file is
+# shipped by the separate libsodium-sumo package.
+RUN cp \
+    node_modules/libsodium-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs \
+    node_modules/libsodium-wrappers-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs
+
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:24-slim AS runner
 
