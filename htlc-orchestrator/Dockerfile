@@ -13,8 +13,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy the root workspace manifest and the single shared lockfile.
-COPY package.json package-lock.json ./
+# Copy the root workspace manifest, npm config, and the single shared lockfile.
+# npm ci must see the same peer-dependency mode used when the lockfile was made.
+COPY package.json package-lock.json .npmrc ./
 
 # Copy every workspace package.json. The root package.json declares the
 # workspaces; npm ci needs every one of those manifests on disk to reconcile
