@@ -16,14 +16,19 @@ WORKDIR /app
 # Copy the root workspace manifest and the single shared lockfile.
 COPY package.json package-lock.json ./
 
-# Copy only the orchestrator's package.json so npm can resolve its deps
-# from the root lockfile without downloading the rest of the workspace.
+# Copy every workspace package.json. The root package.json declares the
+# workspaces; npm ci needs every one of those manifests on disk to reconcile
+# the lockfile's nested dep tree (peer-dep ranges under @lucid-evolution/*
+# resolve differently when only a subset of workspaces is visible).
+COPY contract/package.json     ./contract/
+COPY htlc-ft-cli/package.json  ./htlc-ft-cli/
+COPY htlc-ui/package.json      ./htlc-ui/
 COPY htlc-orchestrator/package.json ./htlc-orchestrator/
 
 # Install only this workspace's dependencies.
 # --workspace flag installs exactly what htlc-orchestrator/package.json declares.
 # Dependencies land in the root /app/node_modules (workspace hoisting).
-RUN npm ci --workspace=htlc-orchestrator
+RUN npm ci --workspace=htlc-orchestrator --include-workspace-root
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:24-slim AS runner

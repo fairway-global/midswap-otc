@@ -101,6 +101,39 @@ jobs:
       - name: Install all workspace deps
         run: npm ci                                   # runs at repo root
 
+      - name: Cache Compact toolchain
+        uses: actions/cache@v4
+        with:
+          # The installer drops the `compact` wrapper in ~/.local/bin and the
+          # toolchain (pulled by `compact update`) under ~/.compact. Cache both.
+          # Bump this key (or pin a `compact update <version>` below) when the
+          # compiler version needs to change.
+          path: |
+            ~/.local/bin/compact
+            ~/.compact
+          key: compact-toolchain-v0.5.1
+
+      - name: Install Compact compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -x "$HOME/.local/bin/compact" ]; then
+            curl --proto '=https' --tlsv1.2 -LsSf \
+              https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+          fi
+          # Persist PATH for subsequent steps (installer patches ~/.bashrc, which CI doesn't source)
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          # Pull the actual compiler toolchain — the devtools wrapper alone isn't enough.
+          compact update
+          compact --version
+
+      - name: Compile Compact contracts
+        run: |
+          npm run compact:htlc
+          npm run compact:usdc
+        working-directory: contract
+
       - name: Inject production env vars
         run: |
           cat > htlc-ui/.env.preprod << 'EOF'
