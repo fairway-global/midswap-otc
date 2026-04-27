@@ -2,7 +2,7 @@
   <img src="htlc-ui/public/kaamos-full.png" alt="Kaamos" width="260" />
 </p>
 
-<h1 align="center">Kaamos Midswap OTC</h1>
+<h1 align="center">Kaamos Midnight-Cardano OTC</h1>
 
 <p align="center">
   Private cross-chain OTC settlement between Cardano and Midnight using hash-time-locked escrow.
