@@ -132,7 +132,6 @@ chown -R deploy:deploy /opt/midswap
 if [[ ! -f /opt/midswap/.env ]]; then
     cat > /opt/midswap/.env << EOF
 # Fill in real values — see deploy/.env.example in the repository.
-GHCR_USER=${GITHUB_USERNAME}
 IMAGE_TAG=latest
 BLOCKFROST_API_KEY=REPLACE_ME
 MIDNIGHT_NETWORK=preprod

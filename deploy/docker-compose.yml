@@ -11,8 +11,8 @@
 services:
   orchestrator:
     # Image is built and pushed by GitHub Actions on every merge to main.
-    # GHCR_USER is set in /opt/midswap/.env (your GitHub username/org).
-    image: ghcr.io/${GHCR_USER}/midswap-orchestrator:${IMAGE_TAG:-latest}
+    # Image owner must match the GitHub Actions IMAGE_NAME.
+    image: ghcr.io/fairway-global/midswap-orchestrator:${IMAGE_TAG:-latest}
     container_name: midswap-orchestrator
     restart: unless-stopped
 
