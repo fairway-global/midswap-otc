@@ -190,7 +190,7 @@ jobs:
           key: ${{ secrets.VM_SSH_KEY }}
           source: "deploy/docker-compose.yml"
           target: "/opt/midswap/"
-          strip_components: 2
+          strip_components: 1
 
       - name: Upload deploy script to VM
         uses: appleboy/scp-action@v0.1.7

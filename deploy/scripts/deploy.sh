@@ -25,7 +25,11 @@ echo "[deploy] Deploying orchestrator image tag: ${IMAGE_TAG}"
 # ── 1. Update IMAGE_TAG ───────────────────────────────────────────────────────
 # sed -i edits the file in-place. The \b word boundary ensures we only replace
 # the IMAGE_TAG= line and not other lines that happen to contain "IMAGE_TAG".
-sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" "${ENV_FILE}"
+if grep -q '^IMAGE_TAG=' "${ENV_FILE}"; then
+  sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${IMAGE_TAG}|" "${ENV_FILE}"
+else
+  printf '\nIMAGE_TAG=%s\n' "${IMAGE_TAG}" >> "${ENV_FILE}"
+fi
 
 # ── 2. Pull the new image ─────────────────────────────────────────────────────
 # docker compose pull fetches only the services whose image tag changed.
