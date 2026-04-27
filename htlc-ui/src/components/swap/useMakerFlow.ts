@@ -1,5 +1,5 @@
 /**
- * Maker flow hook — lock ADA on Cardano, watch Midnight for the taker's USDC
+ * Maker flow hook — lock USDM on Cardano, watch Midnight for the taker's USDC
  * deposit, claim USDC (revealing the preimage).
  *
  * Extracted 1:1 from the original AliceSwap component. The reducer / effects /
@@ -12,13 +12,16 @@ import { firstValueFrom } from 'rxjs';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { bytesToHex, hexToBytes } from '../../api/key-encoding';
+import { watchForPreimageReveal } from '../../api/midnight-watcher';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
 
 export interface MakerLockParams {
-  readonly adaAmount: bigint;
+  readonly usdmAmount: bigint;
   readonly usdcAmount: bigint;
   readonly deadlineMin: number;
   readonly counterpartyPkh: string;
+  /** OTC bridge link — when present, the orchestrator stamps the RFQ as Settling. */
+  readonly rfqId?: string;
 }
 
 export type MakerStep =
@@ -30,7 +33,7 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
     }
   | {
@@ -39,7 +42,7 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
     }
   | {
@@ -48,7 +51,7 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
       depositAmount: bigint;
       depositColorHex: string;
@@ -59,12 +62,21 @@ export type MakerStep =
       preimageHex: string;
       lockTxHash: string;
       deadlineMs: bigint;
-      adaAmount: bigint;
+      usdmAmount: bigint;
       usdcAmount: bigint;
       depositAmount: bigint;
       depositColorHex: string;
     }
-  | { kind: 'done'; hashHex: string; lockTxHash: string; adaAmount: bigint; depositAmount: bigint }
+  | {
+      kind: 'done';
+      hashHex: string;
+      lockTxHash: string;
+      usdmAmount: bigint;
+      depositAmount: bigint;
+      /** Midnight withdraw tx hash. Undefined when Lace's submit-wrapper
+       *  threw but the claim still landed (Landmine #5). */
+      claimTxHash?: string;
+    }
   | { kind: 'error'; message: string };
 
 type MakerAction =
@@ -74,7 +86,7 @@ type MakerAction =
   | { t: 'to-waiting' }
   | { t: 'deposit-seen'; depositAmount: bigint; depositColorHex: string }
   | { t: 'to-claiming' }
-  | { t: 'to-done'; depositAmount: bigint }
+  | { t: 'to-done'; depositAmount: bigint; claimTxHash?: string }
   | { t: 'error'; message: string }
   | { t: 'reset' };
 
@@ -105,8 +117,9 @@ const reducer = (state: MakerStep, action: MakerAction): MakerStep => {
             kind: 'done',
             hashHex: state.hashHex,
             lockTxHash: state.lockTxHash,
-            adaAmount: state.adaAmount,
+            usdmAmount: state.usdmAmount,
             depositAmount: action.depositAmount,
+            claimTxHash: action.claimTxHash,
           }
         : state;
     case 'error':
@@ -125,7 +138,7 @@ interface PersistedSwap {
   preimageHex: string;
   lockTxHash: string;
   deadlineMs: string;
-  adaAmount: string;
+  usdmAmount: string;
   usdcAmount: string;
 }
 
@@ -226,7 +239,8 @@ export const useMakerFlow = (): UseMakerFlow => {
           preimageHex: pending.preimageHex,
           lockTxHash: pending.lockTxHash,
           deadlineMs: BigInt(pending.deadlineMs),
-          adaAmount: BigInt(pending.adaAmount),
+          // Legacy restore: pre-USDM records stored the amount as `adaAmount`.
+          usdmAmount: BigInt(pending.usdmAmount ?? (pending as unknown as { adaAmount: string }).adaAmount),
           usdcAmount: BigInt(pending.usdcAmount),
         },
       });
@@ -253,7 +267,7 @@ export const useMakerFlow = (): UseMakerFlow => {
     url.searchParams.set('aliceCpk', session.bootstrap.coinPublicKeyHex);
     url.searchParams.set('aliceUnshielded', session.bootstrap.unshieldedAddressHex);
     url.searchParams.set('cardanoDeadlineMs', state.deadlineMs.toString());
-    url.searchParams.set('adaAmount', state.adaAmount.toString());
+    url.searchParams.set('usdmAmount', state.usdmAmount.toString());
     url.searchParams.set('usdcAmount', state.usdcAmount.toString());
     return url.toString();
   }, [session, state]);
@@ -270,16 +284,21 @@ export const useMakerFlow = (): UseMakerFlow => {
         const hashHex = bytesToHex(hashLock);
         const preimageHex = bytesToHex(preimage);
         const deadlineMs = BigInt(Date.now() + params.deadlineMin * 60 * 1000);
-        const lovelace = params.adaAmount * 1_000_000n;
 
-        const lockTxHash = await cardano.cardanoHtlc.lock(lovelace, hashHex, params.counterpartyPkh, deadlineMs);
+        const lockTxHash = await cardano.cardanoHtlc.lock(
+          params.usdmAmount,
+          cardano.usdmPolicy.unit,
+          hashHex,
+          params.counterpartyPkh,
+          deadlineMs,
+        );
 
         savePending(session.bootstrap.coinPublicKeyHex, {
           hashHex,
           preimageHex,
           lockTxHash,
           deadlineMs: deadlineMs.toString(),
-          adaAmount: params.adaAmount.toString(),
+          usdmAmount: params.usdmAmount.toString(),
           usdcAmount: params.usdcAmount.toString(),
         });
 
@@ -287,14 +306,15 @@ export const useMakerFlow = (): UseMakerFlow => {
           () =>
             orchestratorClient.createSwap({
               hash: hashHex,
-              direction: 'ada-usdc',
+              direction: 'usdm-usdc',
               aliceCpk: session.bootstrap.coinPublicKeyHex,
               aliceUnshielded: session.bootstrap.unshieldedAddressHex,
-              adaAmount: params.adaAmount.toString(),
+              usdmAmount: params.usdmAmount.toString(),
               usdcAmount: params.usdcAmount.toString(),
               cardanoDeadlineMs: Number(deadlineMs),
               cardanoLockTx: lockTxHash,
               bobPkh: params.counterpartyPkh,
+              rfqId: params.rfqId,
             }),
           'createSwap',
         );
@@ -307,7 +327,7 @@ export const useMakerFlow = (): UseMakerFlow => {
             preimageHex,
             lockTxHash,
             deadlineMs,
-            adaAmount: params.adaAmount,
+            usdmAmount: params.usdmAmount,
             usdcAmount: params.usdcAmount,
           },
         });
@@ -418,17 +438,55 @@ export const useMakerFlow = (): UseMakerFlow => {
       }
 
       const preimage = hexToBytes(state.preimageHex);
-      await session.htlcApi.withdrawWithPreimage(preimage);
+      // Lace's submitTransaction sometimes throws "Request timed out" even when
+      // the tx lands on-chain (Landmine #5). Before failing, verify the claim
+      // by watching `revealedPreimages[hash]` on the Midnight indexer.
+      let claimTxHash: string | undefined;
+      let submitError: unknown;
+      try {
+        claimTxHash = await session.htlcApi.withdrawWithPreimage(preimage);
+      } catch (e) {
+        submitError = e;
+        console.warn('[useMakerFlow:claim] submit surfaced error; verifying on-chain', e);
+      }
+
+      if (submitError) {
+        let claimed = false;
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 60_000);
+          await watchForPreimageReveal(
+            session.bootstrap.htlcProviders.publicDataProvider,
+            session.htlcApi.deployedContractAddress,
+            hexToBytes(state.hashHex),
+            5_000,
+            controller.signal,
+          );
+          clearTimeout(timer);
+          claimed = true;
+        } catch {
+          /* abort = preimage never surfaced within window */
+        }
+        if (!claimed) {
+          const msg = describeError(submitError);
+          toast.error(`Claim failed: ${msg}`);
+          dispatch({ t: 'error', message: msg });
+          return;
+        }
+        toast.info('Wallet returned an error but the claim landed on-chain — continuing.');
+      }
+
       void tryOrchestrator(
         () =>
           orchestratorClient.patchSwap(state.hashHex, {
             status: 'alice_claimed',
             midnightPreimage: state.preimageHex,
+            ...(claimTxHash ? { midnightClaimTx: claimTxHash } : {}),
           }),
         'patchSwap alice_claimed',
       );
       clearPending(session.bootstrap.coinPublicKeyHex);
-      dispatch({ t: 'to-done', depositAmount: state.depositAmount });
+      dispatch({ t: 'to-done', depositAmount: state.depositAmount, claimTxHash });
     } catch (e) {
       console.error('[useMakerFlow:claim]', e);
       const msg = describeError(e);

@@ -12,7 +12,7 @@
     "mint-usdc": "node --experimental-specifier-resolution=node --loader ts-node/esm src/mint-usdc.ts",
     "swap:alice": "node --experimental-specifier-resolution=node --loader ts-node/esm src/alice-swap.ts",
     "swap:bob": "node --experimental-specifier-resolution=node --loader ts-node/esm src/bob-swap.ts",
-    "reclaim-ada": "node --experimental-specifier-resolution=node --loader ts-node/esm src/reclaim-ada.ts",
+    "reclaim-usdm": "node --experimental-specifier-resolution=node --loader ts-node/esm src/reclaim-usdm.ts",
     "reclaim-usdc": "node --experimental-specifier-resolution=node --loader ts-node/esm src/reclaim-usdc.ts",
     "mint-tnight": "node --experimental-specifier-resolution=node --loader ts-node/esm src/mint-tnight.ts",
     "check-balance": "node --experimental-specifier-resolution=node --loader ts-node/esm src/check-balance.ts",

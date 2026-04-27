@@ -14,7 +14,7 @@ const STATUS_VALUES: readonly SwapStatus[] = [
   'bob_reclaimed',
   'expired',
 ];
-const DIRECTION_VALUES: readonly FlowDirection[] = ['ada-usdc', 'usdc-ada'];
+const DIRECTION_VALUES: readonly FlowDirection[] = ['usdm-usdc', 'usdc-usdm'];
 
 const isHash = (s: unknown): s is string => typeof s === 'string' && HASH_RE.test(s);
 const isHex = (s: unknown): s is string => typeof s === 'string' && HEX_RE.test(s);
@@ -28,10 +28,10 @@ const validateCreateBody = (body: unknown): CreateSwapBody | string => {
   if (!isHash(b.hash)) return 'hash must be 64 lowercase hex chars';
   if (!isHex(b.aliceCpk)) return 'aliceCpk must be hex';
   if (!isNonEmptyString(b.aliceUnshielded)) return 'aliceUnshielded must be non-empty string';
-  if (!isNonEmptyString(b.adaAmount)) return 'adaAmount must be decimal string';
+  if (!isNonEmptyString(b.usdmAmount)) return 'usdmAmount must be decimal string';
   if (!isNonEmptyString(b.usdcAmount)) return 'usdcAmount must be decimal string';
 
-  const direction: FlowDirection = (b.direction as FlowDirection | undefined) ?? 'ada-usdc';
+  const direction: FlowDirection = (b.direction as FlowDirection | undefined) ?? 'usdm-usdc';
   if (!DIRECTION_VALUES.includes(direction)) {
     return `direction must be one of: ${DIRECTION_VALUES.join(', ')}`;
   }
@@ -41,11 +41,11 @@ const validateCreateBody = (body: unknown): CreateSwapBody | string => {
     direction,
     aliceCpk: b.aliceCpk.toLowerCase(),
     aliceUnshielded: b.aliceUnshielded,
-    adaAmount: b.adaAmount,
+    usdmAmount: b.usdmAmount,
     usdcAmount: b.usdcAmount,
   };
 
-  if (direction === 'ada-usdc') {
+  if (direction === 'usdm-usdc') {
     // Maker has done the Cardano lock at creation time.
     if (!isPosInt(b.cardanoDeadlineMs)) return 'cardanoDeadlineMs required for ada-usdc (integer ms)';
     if (!isNonEmptyString(b.cardanoLockTx)) return 'cardanoLockTx required for ada-usdc';
@@ -56,15 +56,31 @@ const validateCreateBody = (body: unknown): CreateSwapBody | string => {
   } else {
     // Maker has done the Midnight deposit at creation time.
     if (!isPosInt(b.midnightDeadlineMs)) return 'midnightDeadlineMs required for usdc-ada (integer ms)';
-    if (!isNonEmptyString(b.midnightDepositTx)) return 'midnightDepositTx required for usdc-ada';
+    // midnightDepositTx is OPTIONAL — Lace's submit-wrapper sometimes throws
+    // even when the tx lands on-chain (Landmine #5). The maker verifies the
+    // entry via the indexer and continues without a hash; the on-chain entry
+    // is what the watcher needs, the hash is a display nicety.
+    if (b.midnightDepositTx !== undefined && !isNonEmptyString(b.midnightDepositTx)) {
+      return 'midnightDepositTx, if provided, must be a non-empty string';
+    }
     if (!isHex(b.bobCpk)) return 'bobCpk required for usdc-ada (taker Midnight coin key, hex)';
     if (!isNonEmptyString(b.bobUnshielded)) return 'bobUnshielded required for usdc-ada (taker Midnight unshielded)';
     if (!isPkh(b.bobPkh)) return 'bobPkh required for usdc-ada (maker OWN Cardano PKH, 56 hex)';
     out.midnightDeadlineMs = b.midnightDeadlineMs;
-    out.midnightDepositTx = b.midnightDepositTx;
+    if (b.midnightDepositTx) out.midnightDepositTx = b.midnightDepositTx;
     out.bobCpk = b.bobCpk.toLowerCase();
     out.bobUnshielded = b.bobUnshielded;
     out.bobPkh = b.bobPkh.toLowerCase();
+  }
+
+  // Optional bridge linkage to an OTC RFQ. Maker propagates this when the
+  // /swap?rfqId=... flow drove the lock. The orchestrator stamps the RFQ
+  // with swap_hash + status='Settling' on insert.
+  if (b.rfqId !== undefined) {
+    if (typeof b.rfqId !== 'string' || b.rfqId.length === 0 || b.rfqId.length > 64) {
+      return 'rfqId must be a non-empty string';
+    }
+    out.rfqId = b.rfqId;
   }
 
   return out;

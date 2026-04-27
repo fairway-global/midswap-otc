@@ -2,7 +2,30 @@ import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CreateSwapBody, FlowDirection, PatchSwapBody, Swap, SwapStatus } from './types.js';
+import { randomUUID } from 'node:crypto';
+import type { Notifier } from './services/notifications.js';
+import { composeShareUrlParams } from './services/swap-bridge.js';
+import type {
+  Activity,
+  ActivityType,
+  CounterQuoteInput,
+  CreateRfqInput,
+  CreateSwapBody,
+  FlowDirection,
+  OtcUser,
+  PatchSwapBody,
+  Quote,
+  QuoteStatus,
+  Rfq,
+  RfqStatus,
+  RfqSide,
+  SubmitQuoteInput,
+  Swap,
+  SwapStatus,
+  UserWallet,
+  UserWalletInput,
+  WalletSnapshot,
+} from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -11,7 +34,7 @@ interface SwapRow {
   direction: FlowDirection;
   alice_cpk: string;
   alice_unshielded: string;
-  ada_amount: string;
+  usdm_amount: string;
   usdc_amount: string;
   cardano_deadline_ms: number | null;
   cardano_lock_tx: string | null;
@@ -25,6 +48,7 @@ interface SwapRow {
   cardano_reclaim_tx: string | null;
   midnight_reclaim_tx: string | null;
   midnight_preimage: string | null;
+  rfq_id: string | null;
   status: SwapStatus;
   created_at: number;
   updated_at: number;
@@ -35,7 +59,7 @@ const rowToSwap = (row: SwapRow): Swap => ({
   direction: row.direction,
   aliceCpk: row.alice_cpk,
   aliceUnshielded: row.alice_unshielded,
-  adaAmount: row.ada_amount,
+  usdmAmount: row.usdm_amount,
   usdcAmount: row.usdc_amount,
   cardanoDeadlineMs: row.cardano_deadline_ms,
   cardanoLockTx: row.cardano_lock_tx,
@@ -49,6 +73,7 @@ const rowToSwap = (row: SwapRow): Swap => ({
   cardanoReclaimTx: row.cardano_reclaim_tx,
   midnightReclaimTx: row.midnight_reclaim_tx,
   midnightPreimage: row.midnight_preimage,
+  rfqId: row.rfq_id,
   status: row.status,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -62,10 +87,41 @@ export interface SwapStore {
   close(): void;
 }
 
-export const openSwapStore = (dbPath: string): SwapStore => {
+/**
+ * Open a shared Database handle with the standard pragmas. Both
+ * `openSwapStore` and `openOtcStore` accept either an open handle or a
+ * path; passing the same handle lets them share the connection + WAL.
+ */
+export const openDatabase = (dbPath: string): Database.Database => {
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
+  return db;
+};
+
+/**
+ * The bridge surface the swap store calls when a `rfqId` is set on a
+ * createSwap body or a swap patch arrives. Wired up by `openOtcStore` and
+ * passed back into `openSwapStore` so the swap store stays decoupled from
+ * OTC concerns when the OTC store isn't loaded.
+ *
+ * `linkSwapToRfq` and `markRfqSettled` mutate RFQ state (status + activity).
+ * `onSwapStatusChange` is fire-and-forget — it exists so the OTC layer can
+ * fan out notifications on intermediate transitions (bob_deposited,
+ * alice_claimed, expired, *_reclaimed) without coupling the swap store to
+ * the notifier.
+ */
+export interface SwapBridge {
+  linkSwapToRfq(rfqId: string, swap: Swap): void;
+  markRfqSettled(rfqId: string, swap: Swap): void;
+  onSwapStatusChange(rfqId: string, swap: Swap): void;
+}
+
+export const openSwapStore = (
+  dbOrPath: string | Database.Database,
+  bridge?: SwapBridge,
+): SwapStore => {
+  const db = typeof dbOrPath === 'string' ? openDatabase(dbOrPath) : dbOrPath;
 
   // Step 1 — ensure the base table exists (no-op if already present).
   const schema = readFileSync(resolve(__dirname, 'schema.sql'), 'utf8');
@@ -83,7 +139,10 @@ export const openSwapStore = (dbPath: string): SwapStore => {
     db.exec('ALTER TABLE swaps ADD COLUMN midnight_preimage TEXT');
   }
   if (!colNames.has('direction')) {
-    db.exec(`ALTER TABLE swaps ADD COLUMN direction TEXT NOT NULL DEFAULT 'ada-usdc'`);
+    db.exec(`ALTER TABLE swaps ADD COLUMN direction TEXT NOT NULL DEFAULT 'usdm-usdc'`);
+  }
+  if (!colNames.has('rfq_id')) {
+    db.exec('ALTER TABLE swaps ADD COLUMN rfq_id TEXT');
   }
 
   // Step 3 — legacy NOT-NULL rebuild. Older schemas declared
@@ -101,11 +160,11 @@ export const openSwapStore = (dbPath: string): SwapStore => {
       db.exec(`
         CREATE TABLE swaps_new (
           hash TEXT PRIMARY KEY,
-          direction TEXT NOT NULL DEFAULT 'ada-usdc'
-            CHECK (direction IN ('ada-usdc', 'usdc-ada')),
+          direction TEXT NOT NULL DEFAULT 'usdm-usdc'
+            CHECK (direction IN ('usdm-usdc', 'usdc-usdm')),
           alice_cpk TEXT NOT NULL,
           alice_unshielded TEXT NOT NULL,
-          ada_amount TEXT NOT NULL,
+          usdm_amount TEXT NOT NULL,
           usdc_amount TEXT NOT NULL,
           cardano_deadline_ms INTEGER,
           cardano_lock_tx TEXT,
@@ -119,6 +178,7 @@ export const openSwapStore = (dbPath: string): SwapStore => {
           cardano_reclaim_tx TEXT,
           midnight_reclaim_tx TEXT,
           midnight_preimage TEXT,
+          rfq_id TEXT,
           status TEXT NOT NULL CHECK (status IN (
             'open','bob_deposited','alice_claimed','completed',
             'alice_reclaimed','bob_reclaimed','expired'
@@ -129,11 +189,11 @@ export const openSwapStore = (dbPath: string): SwapStore => {
       `);
       db.exec(`
         INSERT INTO swaps_new SELECT
-          hash, direction, alice_cpk, alice_unshielded, ada_amount, usdc_amount,
+          hash, direction, alice_cpk, alice_unshielded, usdm_amount, usdc_amount,
           cardano_deadline_ms, cardano_lock_tx, bob_pkh,
           midnight_deadline_ms, midnight_deposit_tx, bob_cpk, bob_unshielded,
           midnight_claim_tx, cardano_claim_tx, cardano_reclaim_tx, midnight_reclaim_tx,
-          midnight_preimage, status, created_at, updated_at
+          midnight_preimage, rfq_id, status, created_at, updated_at
         FROM swaps
       `);
       db.exec('DROP TABLE swaps');
@@ -145,24 +205,101 @@ export const openSwapStore = (dbPath: string): SwapStore => {
     }
   }
 
-  // Step 4 — indexes (now safe because `direction` etc. definitely exist).
+  // Step 3b — direction-CHECK rebuild. DBs created before the ADA→USDM
+  // rename carry `CHECK (direction IN ('ada-usdc','usdc-ada'))` and rows
+  // populated with those literals. SQLite can't alter CHECK in place, so we
+  // detect the old CHECK in sqlite_master and rebuild if present, backfilling
+  // direction values at the same time.
+  const tableDdl =
+    (
+      db
+        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='swaps'")
+        .get() as { sql?: string } | undefined
+    )?.sql ?? '';
+  if (tableDdl.includes("'ada-usdc'") || tableDdl.includes("'usdc-ada'")) {
+    const hasAdaAmount = existingCols.some((c) => c.name === 'ada_amount');
+    const hasUsdmAmount = existingCols.some((c) => c.name === 'usdm_amount');
+    const amountSelect = hasUsdmAmount
+      ? 'usdm_amount'
+      : hasAdaAmount
+        ? 'ada_amount AS usdm_amount'
+        : "'0' AS usdm_amount";
+
+    db.exec('BEGIN');
+    try {
+      db.exec(`
+        CREATE TABLE swaps_new (
+          hash TEXT PRIMARY KEY,
+          direction TEXT NOT NULL DEFAULT 'usdm-usdc'
+            CHECK (direction IN ('usdm-usdc', 'usdc-usdm')),
+          alice_cpk TEXT NOT NULL,
+          alice_unshielded TEXT NOT NULL,
+          usdm_amount TEXT NOT NULL,
+          usdc_amount TEXT NOT NULL,
+          cardano_deadline_ms INTEGER,
+          cardano_lock_tx TEXT,
+          bob_pkh TEXT,
+          midnight_deadline_ms INTEGER,
+          midnight_deposit_tx TEXT,
+          bob_cpk TEXT,
+          bob_unshielded TEXT,
+          midnight_claim_tx TEXT,
+          cardano_claim_tx TEXT,
+          cardano_reclaim_tx TEXT,
+          midnight_reclaim_tx TEXT,
+          midnight_preimage TEXT,
+          rfq_id TEXT,
+          status TEXT NOT NULL CHECK (status IN (
+            'open','bob_deposited','alice_claimed','completed',
+            'alice_reclaimed','bob_reclaimed','expired'
+          )),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      db.exec(`
+        INSERT INTO swaps_new SELECT
+          hash,
+          CASE direction
+            WHEN 'ada-usdc' THEN 'usdm-usdc'
+            WHEN 'usdc-ada' THEN 'usdc-usdm'
+            ELSE direction
+          END AS direction,
+          alice_cpk, alice_unshielded, ${amountSelect}, usdc_amount,
+          cardano_deadline_ms, cardano_lock_tx, bob_pkh,
+          midnight_deadline_ms, midnight_deposit_tx, bob_cpk, bob_unshielded,
+          midnight_claim_tx, cardano_claim_tx, cardano_reclaim_tx, midnight_reclaim_tx,
+          midnight_preimage, NULL AS rfq_id, status, created_at, updated_at
+        FROM swaps
+      `);
+      db.exec('DROP TABLE swaps');
+      db.exec('ALTER TABLE swaps_new RENAME TO swaps');
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  // Step 4 — indexes (now safe because every column definitely exists).
   db.exec('CREATE INDEX IF NOT EXISTS idx_swaps_status     ON swaps(status)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_swaps_direction  ON swaps(direction)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_swaps_alice_cpk  ON swaps(alice_cpk)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_swaps_bob_cpk    ON swaps(bob_cpk)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_swaps_bob_pkh    ON swaps(bob_pkh)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_swaps_rfq_id     ON swaps(rfq_id)');
 
   // The reverse flow lets the maker pre-populate many more fields at creation
   // than the forward flow, so we build the INSERT dynamically.
   const createSwap = (body: CreateSwapBody): Swap => {
     const now = Date.now();
-    const direction: FlowDirection = body.direction ?? 'ada-usdc';
+    const direction: FlowDirection = body.direction ?? 'usdm-usdc';
     const columns: Record<string, unknown> = {
       hash: body.hash,
       direction,
       alice_cpk: body.aliceCpk,
       alice_unshielded: body.aliceUnshielded,
-      ada_amount: body.adaAmount,
+      usdm_amount: body.usdmAmount,
       usdc_amount: body.usdcAmount,
       cardano_deadline_ms: body.cardanoDeadlineMs ?? null,
       cardano_lock_tx: body.cardanoLockTx ?? null,
@@ -171,6 +308,7 @@ export const openSwapStore = (dbPath: string): SwapStore => {
       midnight_deposit_tx: body.midnightDepositTx ?? null,
       bob_cpk: body.bobCpk ?? null,
       bob_unshielded: body.bobUnshielded ?? null,
+      rfq_id: body.rfqId ?? null,
       status: 'open' as SwapStatus,
       created_at: now,
       updated_at: now,
@@ -181,7 +319,20 @@ export const openSwapStore = (dbPath: string): SwapStore => {
     db.prepare(sql).run(columns);
     const row = getStmt.get(body.hash);
     if (!row) throw new Error('insert succeeded but row not found');
-    return rowToSwap(row);
+
+    const swap = rowToSwap(row);
+    // Bridge: link to the RFQ and stamp it Settling.
+    if (body.rfqId && bridge) {
+      try {
+        bridge.linkSwapToRfq(body.rfqId, swap);
+      } catch (err) {
+        // Bridge errors are non-fatal — the swap row already exists; the OTC
+        // layer is advisory. Surface for observability without breaking the
+        // chain-authoritative create.
+        console.error('[bridge] linkSwapToRfq failed', err);
+      }
+    }
+    return swap;
   };
 
   const getStmt = db.prepare<[string], SwapRow>('SELECT * FROM swaps WHERE hash = ?');
@@ -254,11 +405,1220 @@ export const openSwapStore = (dbPath: string): SwapStore => {
       const sql = `UPDATE swaps SET ${setClauses.join(', ')} WHERE hash = @hash`;
       const result = db.prepare(sql).run(params);
       if (result.changes === 0) return undefined;
-      return this.get(hash);
+      const updated = this.get(hash);
+
+      // Bridge propagation: notify the OTC layer of every status change on
+      // an RFQ-linked swap. `onSwapStatusChange` drives the bell fanout for
+      // intermediate transitions (bob_deposited, alice_claimed, expired,
+      // *_reclaimed). `markRfqSettled` is the one mutation — it flips the
+      // RFQ row to Settled and inserts the SETTLEMENT_COMPLETED activity.
+      if (updated && body.status && updated.rfqId && bridge) {
+        try {
+          bridge.onSwapStatusChange(updated.rfqId, updated);
+        } catch (err) {
+          console.error('[bridge] onSwapStatusChange failed', err);
+        }
+        if (body.status === 'completed') {
+          try {
+            bridge.markRfqSettled(updated.rfqId, updated);
+          } catch (err) {
+            console.error('[bridge] markRfqSettled failed', err);
+          }
+        }
+      }
+      return updated;
     },
 
     close() {
       db.close();
+    },
+  };
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// OTC Store
+// ──────────────────────────────────────────────────────────────────────
+
+interface OtcUserRow {
+  id: string;
+  supabase_id: string;
+  email: string;
+  full_name: string;
+  institution_name: string | null;
+  is_admin: number;
+  created_at: number;
+}
+
+interface UserWalletRow {
+  user_id: string;
+  midnight_cpk_bytes: string;
+  midnight_unshielded_bytes: string;
+  midnight_cpk_bech32: string;
+  midnight_unshielded_bech32: string;
+  cardano_pkh: string;
+  cardano_address: string;
+  updated_at: number;
+}
+
+interface RfqRow {
+  id: string;
+  reference: string;
+  originator_id: string;
+  originator_name: string;
+  originator_email: string;
+  side: RfqSide;
+  sell_amount: string;
+  indicative_buy_amount: string;
+  status: RfqStatus;
+  selected_quote_id: string | null;
+  selected_provider_id: string | null;
+  selected_provider_name: string | null;
+  selected_provider_email: string | null;
+  accepted_price: string | null;
+  swap_hash: string | null;
+  originator_wallet_snapshot: string | null;
+  provider_wallet_snapshot: string | null;
+  created_at: number;
+  updated_at: number;
+  expires_at: number;
+}
+
+interface QuoteRow {
+  id: string;
+  rfq_id: string;
+  provider_id: string;
+  provider_name: string;
+  version: number;
+  parent_quote_id: string | null;
+  price: string;
+  sell_amount: string;
+  buy_amount: string;
+  status: QuoteStatus;
+  note: string | null;
+  submitted_by_user_id: string;
+  submitted_by_name: string;
+  /** JSON-encoded WalletSnapshot, captured at submit/counter time. */
+  quoter_wallet_snapshot: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+interface ActivityRow {
+  id: string;
+  rfq_id: string;
+  type: ActivityType;
+  actor_id: string;
+  actor_name: string;
+  summary: string;
+  related_quote_id: string | null;
+  created_at: number;
+}
+
+const rowToUser = (row: OtcUserRow): OtcUser => ({
+  id: row.id,
+  supabaseId: row.supabase_id,
+  email: row.email,
+  fullName: row.full_name,
+  institutionName: row.institution_name,
+  isAdmin: row.is_admin === 1,
+  createdAt: row.created_at,
+});
+
+const rowToWallet = (row: UserWalletRow): UserWallet => ({
+  userId: row.user_id,
+  midnightCpkBytes: row.midnight_cpk_bytes,
+  midnightUnshieldedBytes: row.midnight_unshielded_bytes,
+  midnightCpkBech32: row.midnight_cpk_bech32,
+  midnightUnshieldedBech32: row.midnight_unshielded_bech32,
+  cardanoPkh: row.cardano_pkh,
+  cardanoAddress: row.cardano_address,
+  updatedAt: row.updated_at,
+});
+
+const rowToRfq = (row: RfqRow): Rfq => ({
+  id: row.id,
+  reference: row.reference,
+  originatorId: row.originator_id,
+  originatorName: row.originator_name,
+  originatorEmail: row.originator_email,
+  side: row.side,
+  sellAmount: row.sell_amount,
+  indicativeBuyAmount: row.indicative_buy_amount,
+  status: row.status,
+  selectedQuoteId: row.selected_quote_id,
+  selectedProviderId: row.selected_provider_id,
+  selectedProviderName: row.selected_provider_name,
+  selectedProviderEmail: row.selected_provider_email,
+  acceptedPrice: row.accepted_price,
+  swapHash: row.swap_hash,
+  originatorWalletSnapshot: row.originator_wallet_snapshot
+    ? (JSON.parse(row.originator_wallet_snapshot) as UserWallet)
+    : null,
+  providerWalletSnapshot: row.provider_wallet_snapshot
+    ? (JSON.parse(row.provider_wallet_snapshot) as UserWallet)
+    : null,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  expiresAt: row.expires_at,
+});
+
+const rowToQuote = (row: QuoteRow): Quote => ({
+  id: row.id,
+  rfqId: row.rfq_id,
+  providerId: row.provider_id,
+  providerName: row.provider_name,
+  version: row.version,
+  parentQuoteId: row.parent_quote_id,
+  price: row.price,
+  sellAmount: row.sell_amount,
+  buyAmount: row.buy_amount,
+  status: row.status,
+  note: row.note,
+  submittedByUserId: row.submitted_by_user_id,
+  submittedByName: row.submitted_by_name,
+  walletSnapshot: row.quoter_wallet_snapshot
+    ? (JSON.parse(row.quoter_wallet_snapshot) as WalletSnapshot)
+    : null,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+/**
+ * Validate a per-deal wallet snapshot for the chain the party is RECEIVING
+ * on. `receiveChain` follows from rfq.side mirrored by role:
+ *   originator on sell-usdm: receives USDC on Midnight
+ *   originator on sell-usdc: receives USDM on Cardano
+ *   counterparty on sell-usdm: receives USDM on Cardano
+ *   counterparty on sell-usdc: receives USDC on Midnight
+ */
+const HEX64 = /^[0-9a-f]{64}$/;
+const HEX56 = /^[0-9a-f]{56}$/;
+export const validateWalletSnapshot = (
+  snap: WalletSnapshot,
+  receiveChain: 'midnight' | 'cardano',
+): WalletSnapshot => {
+  const out: WalletSnapshot = {};
+  if (receiveChain === 'midnight') {
+    if (!snap.midnightCpkBytes || !HEX64.test(snap.midnightCpkBytes.toLowerCase())) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightCpkBytes required (64-hex)');
+    }
+    if (!snap.midnightUnshieldedBytes || !HEX64.test(snap.midnightUnshieldedBytes.toLowerCase())) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightUnshieldedBytes required (64-hex)');
+    }
+    if (!snap.midnightCpkBech32 || !snap.midnightCpkBech32.startsWith('mn_shield-cpk_')) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightCpkBech32 required');
+    }
+    if (!snap.midnightUnshieldedBech32 || !snap.midnightUnshieldedBech32.startsWith('mn_addr_')) {
+      throw new OtcError('invalid_wallet_snapshot', 'midnightUnshieldedBech32 required');
+    }
+    out.midnightCpkBytes = snap.midnightCpkBytes.toLowerCase();
+    out.midnightUnshieldedBytes = snap.midnightUnshieldedBytes.toLowerCase();
+    out.midnightCpkBech32 = snap.midnightCpkBech32;
+    out.midnightUnshieldedBech32 = snap.midnightUnshieldedBech32;
+  } else {
+    if (!snap.cardanoPkh || !HEX56.test(snap.cardanoPkh.toLowerCase())) {
+      throw new OtcError('invalid_wallet_snapshot', 'cardanoPkh required (56-hex)');
+    }
+    if (!snap.cardanoAddress || !snap.cardanoAddress.startsWith('addr')) {
+      throw new OtcError('invalid_wallet_snapshot', 'cardanoAddress required (addr/addr_test)');
+    }
+    out.cardanoPkh = snap.cardanoPkh.toLowerCase();
+    out.cardanoAddress = snap.cardanoAddress;
+  }
+  return out;
+};
+
+/**
+ * Which chain a given party RECEIVES on, given the RFQ side.
+ *   originator: sell-usdm → receives USDC on Midnight
+ *   originator: sell-usdc → receives USDM on Cardano
+ *   counterparty: opposite of originator
+ */
+export const receiveChainFor = (
+  side: RfqSide,
+  role: 'originator' | 'counterparty',
+): 'midnight' | 'cardano' => {
+  if (role === 'originator') return side === 'sell-usdm' ? 'midnight' : 'cardano';
+  return side === 'sell-usdm' ? 'cardano' : 'midnight';
+};
+
+const rowToActivity = (row: ActivityRow): Activity => ({
+  id: row.id,
+  rfqId: row.rfq_id,
+  type: row.type,
+  actorId: row.actor_id,
+  actorName: row.actor_name,
+  summary: row.summary,
+  relatedQuoteId: row.related_quote_id,
+  createdAt: row.created_at,
+});
+
+export class OtcError extends Error {
+  constructor(public code: string, message: string, public httpStatus = 400) {
+    super(message);
+    this.name = 'OtcError';
+  }
+}
+
+export interface OtcStore extends SwapBridge {
+  // Users
+  getOrCreateUserBySupabaseId(
+    supabaseId: string,
+    email: string,
+    fullName: string,
+    institutionName: string | null,
+  ): OtcUser;
+  getUserById(id: string): OtcUser | undefined;
+  getUserBySupabaseId(supabaseId: string): OtcUser | undefined;
+  listUsers(): OtcUser[];
+  setAdmin(userId: string, isAdmin: boolean): void;
+
+  // Wallet binding
+  upsertUserWallet(userId: string, input: UserWalletInput): UserWallet;
+  getUserWallet(userId: string): UserWallet | undefined;
+
+  // RFQs
+  createRfq(input: CreateRfqInput): Rfq;
+  listRfqs(filter?: { status?: RfqStatus; side?: RfqSide; mine?: string }): Rfq[];
+  getRfq(id: string): Rfq | undefined;
+  cancelRfq(id: string, actorId: string): Rfq;
+
+  // Quotes
+  listQuotes(rfqId: string): Quote[];
+  submitQuote(input: SubmitQuoteInput): Quote;
+  counterQuote(input: CounterQuoteInput): Quote;
+  acceptQuote(rfqId: string, quoteId: string, actorId: string): Rfq;
+  rejectQuote(rfqId: string, quoteId: string, actorId: string): Rfq;
+
+  // Activity
+  listActivity(rfqId: string): Activity[];
+  insertActivity(
+    rfqId: string,
+    type: ActivityType,
+    actorId: string,
+    actorName: string,
+    summary: string,
+    relatedQuoteId?: string,
+  ): Activity;
+}
+
+export const openOtcStore = (db: Database.Database, notifier?: Notifier): OtcStore => {
+  // Schema — additive; CREATE IF NOT EXISTS so reruns are safe.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS otc_users (
+      id               TEXT PRIMARY KEY,
+      supabase_id      TEXT UNIQUE NOT NULL,
+      email            TEXT UNIQUE NOT NULL,
+      full_name        TEXT NOT NULL,
+      institution_name TEXT,
+      is_admin         INTEGER NOT NULL DEFAULT 0,
+      created_at       INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS user_wallets (
+      user_id                    TEXT PRIMARY KEY REFERENCES otc_users(id) ON DELETE CASCADE,
+      midnight_cpk_bytes         TEXT NOT NULL,
+      midnight_unshielded_bytes  TEXT NOT NULL,
+      midnight_cpk_bech32        TEXT NOT NULL,
+      midnight_unshielded_bech32 TEXT NOT NULL,
+      cardano_pkh                TEXT NOT NULL,
+      cardano_address            TEXT NOT NULL,
+      updated_at                 INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS rfqs (
+      id                         TEXT PRIMARY KEY,
+      reference                  TEXT UNIQUE NOT NULL,
+      originator_id              TEXT NOT NULL REFERENCES otc_users(id),
+      originator_name            TEXT NOT NULL,
+      originator_email           TEXT NOT NULL,
+      side                       TEXT NOT NULL CHECK (side IN ('sell-usdm','sell-usdc')),
+      sell_amount                TEXT NOT NULL,
+      indicative_buy_amount      TEXT NOT NULL,
+      status                     TEXT NOT NULL CHECK (status IN (
+                                   'OpenForQuotes','Negotiating','QuoteSelected',
+                                   'Settling','Settled','Expired','Cancelled'
+                                 )),
+      selected_quote_id          TEXT,
+      selected_provider_id       TEXT,
+      selected_provider_name     TEXT,
+      selected_provider_email    TEXT,
+      accepted_price             TEXT,
+      swap_hash                  TEXT,
+      originator_wallet_snapshot TEXT,
+      provider_wallet_snapshot   TEXT,
+      created_at                 INTEGER NOT NULL,
+      updated_at                 INTEGER NOT NULL,
+      expires_at                 INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS quotes (
+      id                     TEXT PRIMARY KEY,
+      rfq_id                 TEXT NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+      provider_id            TEXT NOT NULL,
+      provider_name          TEXT NOT NULL,
+      version                INTEGER NOT NULL,
+      parent_quote_id        TEXT,
+      price                  TEXT NOT NULL,
+      sell_amount            TEXT NOT NULL,
+      buy_amount             TEXT NOT NULL,
+      status                 TEXT NOT NULL CHECK (status IN (
+                               'Submitted','Countered','Accepted','Rejected','Expired'
+                             )),
+      note                   TEXT,
+      submitted_by_user_id   TEXT NOT NULL,
+      submitted_by_name      TEXT NOT NULL,
+      quoter_wallet_snapshot TEXT,
+      created_at             INTEGER NOT NULL,
+      updated_at             INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS activities (
+      id                TEXT PRIMARY KEY,
+      rfq_id            TEXT NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+      type              TEXT NOT NULL,
+      actor_id          TEXT NOT NULL,
+      actor_name        TEXT NOT NULL,
+      summary           TEXT NOT NULL,
+      related_quote_id  TEXT,
+      created_at        INTEGER NOT NULL
+    );
+  `);
+
+  // Additive migration: existing dev DBs may have a quotes table without
+  // quoter_wallet_snapshot. Add it if missing — idempotent.
+  const quoteCols = db.prepare('PRAGMA table_info(quotes)').all() as Array<{ name: string }>;
+  if (!quoteCols.some((c) => c.name === 'quoter_wallet_snapshot')) {
+    db.exec('ALTER TABLE quotes ADD COLUMN quoter_wallet_snapshot TEXT');
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_rfqs_status      ON rfqs(status);
+    CREATE INDEX IF NOT EXISTS idx_rfqs_originator  ON rfqs(originator_id);
+    CREATE INDEX IF NOT EXISTS idx_rfqs_swap_hash   ON rfqs(swap_hash);
+    CREATE INDEX IF NOT EXISTS idx_quotes_rfq       ON quotes(rfq_id);
+    CREATE INDEX IF NOT EXISTS idx_quotes_provider  ON quotes(provider_id);
+    CREATE INDEX IF NOT EXISTS idx_activities_rfq   ON activities(rfq_id);
+  `);
+
+  // ── Prepared statements ──
+  const getUserBySupabaseStmt = db.prepare<[string], OtcUserRow>(
+    'SELECT * FROM otc_users WHERE supabase_id = ?',
+  );
+  const getUserByIdStmt = db.prepare<[string], OtcUserRow>(
+    'SELECT * FROM otc_users WHERE id = ?',
+  );
+  const insertUserStmt = db.prepare(`
+    INSERT INTO otc_users (id, supabase_id, email, full_name, institution_name, is_admin, created_at)
+    VALUES (@id, @supabase_id, @email, @full_name, @institution_name, @is_admin, @created_at)
+  `);
+  const updateUserMetaStmt = db.prepare(`
+    UPDATE otc_users SET email = @email, full_name = @full_name, institution_name = @institution_name
+    WHERE id = @id
+  `);
+  const listUsersStmt = db.prepare<[], OtcUserRow>(
+    'SELECT * FROM otc_users ORDER BY created_at ASC',
+  );
+  const setAdminStmt = db.prepare<[number, string]>(
+    'UPDATE otc_users SET is_admin = ? WHERE id = ?',
+  );
+
+  const getWalletStmt = db.prepare<[string], UserWalletRow>(
+    'SELECT * FROM user_wallets WHERE user_id = ?',
+  );
+  const upsertWalletStmt = db.prepare(`
+    INSERT INTO user_wallets (
+      user_id, midnight_cpk_bytes, midnight_unshielded_bytes,
+      midnight_cpk_bech32, midnight_unshielded_bech32,
+      cardano_pkh, cardano_address, updated_at
+    ) VALUES (
+      @user_id, @midnight_cpk_bytes, @midnight_unshielded_bytes,
+      @midnight_cpk_bech32, @midnight_unshielded_bech32,
+      @cardano_pkh, @cardano_address, @updated_at
+    )
+    ON CONFLICT(user_id) DO UPDATE SET
+      midnight_cpk_bytes         = excluded.midnight_cpk_bytes,
+      midnight_unshielded_bytes  = excluded.midnight_unshielded_bytes,
+      midnight_cpk_bech32        = excluded.midnight_cpk_bech32,
+      midnight_unshielded_bech32 = excluded.midnight_unshielded_bech32,
+      cardano_pkh                = excluded.cardano_pkh,
+      cardano_address            = excluded.cardano_address,
+      updated_at                 = excluded.updated_at
+  `);
+
+  const getRfqStmt = db.prepare<[string], RfqRow>('SELECT * FROM rfqs WHERE id = ?');
+  const insertRfqStmt = db.prepare(`
+    INSERT INTO rfqs (
+      id, reference, originator_id, originator_name, originator_email,
+      side, sell_amount, indicative_buy_amount, status,
+      selected_quote_id, selected_provider_id, selected_provider_name, selected_provider_email,
+      accepted_price, swap_hash,
+      originator_wallet_snapshot, provider_wallet_snapshot,
+      created_at, updated_at, expires_at
+    ) VALUES (
+      @id, @reference, @originator_id, @originator_name, @originator_email,
+      @side, @sell_amount, @indicative_buy_amount, @status,
+      NULL, NULL, NULL, NULL,
+      NULL, NULL,
+      NULL, NULL,
+      @created_at, @updated_at, @expires_at
+    )
+  `);
+  const listRfqsAllStmt = db.prepare<[], RfqRow>('SELECT * FROM rfqs ORDER BY created_at DESC');
+  const listRfqsByStatusStmt = db.prepare<[RfqStatus], RfqRow>(
+    'SELECT * FROM rfqs WHERE status = ? ORDER BY created_at DESC',
+  );
+  const listRfqsByOriginatorStmt = db.prepare<[string], RfqRow>(
+    'SELECT * FROM rfqs WHERE originator_id = ? ORDER BY created_at DESC',
+  );
+
+  const insertActivityStmt = db.prepare(`
+    INSERT INTO activities (id, rfq_id, type, actor_id, actor_name, summary, related_quote_id, created_at)
+    VALUES (@id, @rfq_id, @type, @actor_id, @actor_name, @summary, @related_quote_id, @created_at)
+  `);
+  const getActivityStmt = db.prepare<[string], ActivityRow>(
+    'SELECT * FROM activities WHERE id = ?',
+  );
+  const listActivityStmt = db.prepare<[string], ActivityRow>(
+    'SELECT * FROM activities WHERE rfq_id = ? ORDER BY created_at ASC',
+  );
+
+  const getQuoteStmt = db.prepare<[string], QuoteRow>('SELECT * FROM quotes WHERE id = ?');
+  const listQuotesStmt = db.prepare<[string], QuoteRow>(
+    'SELECT * FROM quotes WHERE rfq_id = ? ORDER BY created_at ASC',
+  );
+  const insertQuoteStmt = db.prepare(`
+    INSERT INTO quotes (
+      id, rfq_id, provider_id, provider_name, version, parent_quote_id,
+      price, sell_amount, buy_amount, status, note,
+      submitted_by_user_id, submitted_by_name, quoter_wallet_snapshot,
+      created_at, updated_at
+    ) VALUES (
+      @id, @rfq_id, @provider_id, @provider_name, @version, @parent_quote_id,
+      @price, @sell_amount, @buy_amount, @status, @note,
+      @submitted_by_user_id, @submitted_by_name, @quoter_wallet_snapshot,
+      @created_at, @updated_at
+    )
+  `);
+  const updateQuoteStatusStmt = db.prepare<[QuoteStatus, number, string]>(
+    'UPDATE quotes SET status = ?, updated_at = ? WHERE id = ?',
+  );
+  const updateQuotesByRfqExceptStmt = db.prepare<[QuoteStatus, number, string, string]>(
+    'UPDATE quotes SET status = ?, updated_at = ? WHERE rfq_id = ? AND id != ? AND status NOT IN (\'Accepted\',\'Rejected\')',
+  );
+  const maxVersionForProviderStmt = db.prepare<[string, string], { v: number | null }>(
+    'SELECT MAX(version) as v FROM quotes WHERE rfq_id = ? AND provider_id = ?',
+  );
+
+  // RFQ reference counter — monotonic per process. Initialized from MAX in the DB
+  // so a restart picks up where we left off.
+  const lastRefRow = db
+    .prepare<[], { max_ref: string | null }>(
+      "SELECT MAX(reference) as max_ref FROM rfqs WHERE reference LIKE 'RFQ-%'",
+    )
+    .get();
+  let referenceCounter = 0;
+  if (lastRefRow?.max_ref) {
+    const m = lastRefRow.max_ref.match(/^RFQ-(\d+)$/);
+    if (m) referenceCounter = Number(m[1]);
+  }
+  const nextReference = () => {
+    referenceCounter += 1;
+    return `RFQ-${String(referenceCounter).padStart(4, '0')}`;
+  };
+
+  const insertActivityImpl = (
+    rfqId: string,
+    type: ActivityType,
+    actorId: string,
+    actorName: string,
+    summary: string,
+    relatedQuoteId?: string,
+  ): Activity => {
+    const id = randomUUID();
+    insertActivityStmt.run({
+      id,
+      rfq_id: rfqId,
+      type,
+      actor_id: actorId,
+      actor_name: actorName,
+      summary,
+      related_quote_id: relatedQuoteId ?? null,
+      created_at: Date.now(),
+    });
+    const row = getActivityStmt.get(id);
+    if (!row) throw new Error('activity insert succeeded but row missing');
+    return rowToActivity(row);
+  };
+
+  return {
+    // ── Users ──
+    getOrCreateUserBySupabaseId(supabaseId, email, fullName, institutionName) {
+      const existing = getUserBySupabaseStmt.get(supabaseId);
+      if (existing) {
+        // Refresh metadata if Supabase updated it (e.g. user changed name).
+        if (
+          existing.email !== email ||
+          existing.full_name !== fullName ||
+          existing.institution_name !== institutionName
+        ) {
+          updateUserMetaStmt.run({
+            id: existing.id,
+            email,
+            full_name: fullName,
+            institution_name: institutionName,
+          });
+        }
+        return rowToUser({
+          ...existing,
+          email,
+          full_name: fullName,
+          institution_name: institutionName,
+        });
+      }
+      const id = randomUUID();
+      insertUserStmt.run({
+        id,
+        supabase_id: supabaseId,
+        email,
+        full_name: fullName,
+        institution_name: institutionName,
+        is_admin: 0,
+        created_at: Date.now(),
+      });
+      const row = getUserByIdStmt.get(id);
+      if (!row) throw new Error('user insert succeeded but row missing');
+      return rowToUser(row);
+    },
+
+    getUserById(id) {
+      const row = getUserByIdStmt.get(id);
+      return row ? rowToUser(row) : undefined;
+    },
+
+    getUserBySupabaseId(supabaseId) {
+      const row = getUserBySupabaseStmt.get(supabaseId);
+      return row ? rowToUser(row) : undefined;
+    },
+
+    listUsers() {
+      return listUsersStmt.all().map(rowToUser);
+    },
+
+    setAdmin(userId, isAdmin) {
+      setAdminStmt.run(isAdmin ? 1 : 0, userId);
+    },
+
+    // ── Wallet binding ──
+    upsertUserWallet(userId, input) {
+      // Validate hex / bech32 server-side. Light checks; key-encoding round-trip
+      // verification happens client-side via wallet-sdk-address-format.
+      const HEX64 = /^[0-9a-f]{64}$/;
+      const HEX56 = /^[0-9a-f]{56}$/;
+      const norm = {
+        midnightCpkBytes: input.midnightCpkBytes.toLowerCase(),
+        midnightUnshieldedBytes: input.midnightUnshieldedBytes.toLowerCase(),
+        midnightCpkBech32: input.midnightCpkBech32,
+        midnightUnshieldedBech32: input.midnightUnshieldedBech32,
+        cardanoPkh: input.cardanoPkh.toLowerCase(),
+        cardanoAddress: input.cardanoAddress,
+      };
+      if (!HEX64.test(norm.midnightCpkBytes)) {
+        throw new OtcError('invalid_wallet', 'midnightCpkBytes must be 64 lowercase hex chars');
+      }
+      if (!HEX64.test(norm.midnightUnshieldedBytes)) {
+        throw new OtcError(
+          'invalid_wallet',
+          'midnightUnshieldedBytes must be 64 lowercase hex chars',
+        );
+      }
+      if (!HEX56.test(norm.cardanoPkh)) {
+        throw new OtcError('invalid_wallet', 'cardanoPkh must be 56 lowercase hex chars');
+      }
+      if (!norm.midnightCpkBech32.startsWith('mn_shield-cpk_')) {
+        throw new OtcError('invalid_wallet', 'midnightCpkBech32 must start with mn_shield-cpk_');
+      }
+      if (!norm.midnightUnshieldedBech32.startsWith('mn_addr_')) {
+        throw new OtcError(
+          'invalid_wallet',
+          'midnightUnshieldedBech32 must start with mn_addr_',
+        );
+      }
+      if (!norm.cardanoAddress.startsWith('addr')) {
+        throw new OtcError('invalid_wallet', 'cardanoAddress must start with addr');
+      }
+
+      upsertWalletStmt.run({
+        user_id: userId,
+        midnight_cpk_bytes: norm.midnightCpkBytes,
+        midnight_unshielded_bytes: norm.midnightUnshieldedBytes,
+        midnight_cpk_bech32: norm.midnightCpkBech32,
+        midnight_unshielded_bech32: norm.midnightUnshieldedBech32,
+        cardano_pkh: norm.cardanoPkh,
+        cardano_address: norm.cardanoAddress,
+        updated_at: Date.now(),
+      });
+      const row = getWalletStmt.get(userId);
+      if (!row) throw new Error('wallet upsert succeeded but row missing');
+      return rowToWallet(row);
+    },
+
+    getUserWallet(userId) {
+      const row = getWalletStmt.get(userId);
+      return row ? rowToWallet(row) : undefined;
+    },
+
+    // ── RFQs ──
+    createRfq(input) {
+      const originator = this.getUserById(input.originatorId);
+      if (!originator) throw new OtcError('not_found', 'originator not found', 404);
+      // No global wallet binding required — the originator commits to a wallet
+      // when they sign the lock/deposit (existing reducer captures from the
+      // connected session). Posting an RFQ is just an intent.
+      const id = randomUUID();
+      const now = Date.now();
+      const reference = nextReference();
+      insertRfqStmt.run({
+        id,
+        reference,
+        originator_id: originator.id,
+        originator_name: originator.fullName,
+        originator_email: originator.email,
+        side: input.side,
+        sell_amount: input.sellAmount,
+        indicative_buy_amount: input.indicativeBuyAmount,
+        status: 'OpenForQuotes' as RfqStatus,
+        created_at: now,
+        updated_at: now,
+        expires_at: now + input.expiresInSeconds * 1000,
+      });
+      insertActivityImpl(
+        id,
+        'RFQ_CREATED',
+        originator.id,
+        originator.fullName,
+        `Posted ${input.side === 'sell-usdm' ? 'USDM→USDC' : 'USDC→USDM'} order ${reference}`,
+      );
+      const row = getRfqStmt.get(id);
+      if (!row) throw new Error('rfq insert succeeded but row missing');
+      return rowToRfq(row);
+    },
+
+    listRfqs(filter) {
+      let rows: RfqRow[];
+      if (filter?.mine) {
+        rows = listRfqsByOriginatorStmt.all(filter.mine);
+      } else if (filter?.status) {
+        rows = listRfqsByStatusStmt.all(filter.status);
+      } else {
+        rows = listRfqsAllStmt.all();
+      }
+      // Server-side side filter (small N; no need for an extra index).
+      const filtered = filter?.side ? rows.filter((r) => r.side === filter.side) : rows;
+      return filtered.map(rowToRfq);
+    },
+
+    getRfq(id) {
+      const row = getRfqStmt.get(id);
+      return row ? rowToRfq(row) : undefined;
+    },
+
+    cancelRfq(id, actorId) {
+      const rfq = this.getRfq(id);
+      if (!rfq) throw new OtcError('not_found', 'rfq not found', 404);
+      if (rfq.originatorId !== actorId) {
+        throw new OtcError('forbidden', 'only the originator can cancel an RFQ', 403);
+      }
+      if (!['OpenForQuotes', 'Negotiating'].includes(rfq.status)) {
+        throw new OtcError('invalid_state', `cannot cancel an RFQ in state ${rfq.status}`, 409);
+      }
+      db.prepare<[number, string]>(
+        "UPDATE rfqs SET status = 'Cancelled', updated_at = ? WHERE id = ?",
+      ).run(Date.now(), id);
+      insertActivityImpl(id, 'RFQ_CANCELLED', actorId, rfq.originatorName, 'Order cancelled');
+      const updated = this.getRfq(id);
+      if (!updated) throw new Error('rfq missing after cancel');
+      return updated;
+    },
+
+    // ── Quotes ──
+    listQuotes(rfqId) {
+      return listQuotesStmt.all(rfqId).map(rowToQuote);
+    },
+
+    submitQuote(input) {
+      const rfq = this.getRfq(input.rfqId);
+      if (!rfq) throw new OtcError('not_found', 'rfq not found', 404);
+      if (!['OpenForQuotes', 'Negotiating'].includes(rfq.status)) {
+        throw new OtcError('invalid_state', `cannot quote an RFQ in state ${rfq.status}`, 409);
+      }
+      if (rfq.originatorId === input.providerId) {
+        throw new OtcError('forbidden', 'you cannot quote your own RFQ', 403);
+      }
+      const provider = this.getUserById(input.providerId);
+      if (!provider) throw new OtcError('not_found', 'provider not found', 404);
+
+      // Per-deal wallet binding: validate the snapshot for the chain the
+      // quoter will RECEIVE on. No global user_wallets dependency.
+      const receiveChain = receiveChainFor(rfq.side, 'counterparty');
+      const snapshot = validateWalletSnapshot(input.walletSnapshot, receiveChain);
+
+      const id = randomUUID();
+      const now = Date.now();
+      const prior = maxVersionForProviderStmt.get(input.rfqId, input.providerId);
+      const version = (prior?.v ?? 0) + 1;
+
+      insertQuoteStmt.run({
+        id,
+        rfq_id: input.rfqId,
+        provider_id: provider.id,
+        provider_name: provider.fullName,
+        version,
+        parent_quote_id: null,
+        price: input.price,
+        sell_amount: rfq.sellAmount,
+        buy_amount: input.buyAmount,
+        status: 'Submitted' as QuoteStatus,
+        note: input.note ?? null,
+        submitted_by_user_id: provider.id,
+        submitted_by_name: provider.fullName,
+        quoter_wallet_snapshot: JSON.stringify(snapshot),
+        created_at: now,
+        updated_at: now,
+      });
+
+      // Status nudges to Negotiating once we have any quote activity.
+      if (rfq.status === 'OpenForQuotes') {
+        db.prepare<[number, string]>(
+          "UPDATE rfqs SET status = 'Negotiating', updated_at = ? WHERE id = ?",
+        ).run(now, input.rfqId);
+      }
+      insertActivityImpl(
+        input.rfqId,
+        'QUOTE_SUBMITTED',
+        provider.id,
+        provider.fullName,
+        `Submitted quote @ ${input.price}`,
+        id,
+      );
+
+      // Bell fanout: originator gets a "new quote on your RFQ" notification.
+      // The quoter is the actor; nobody else needs to know.
+      if (notifier) {
+        const originator = this.getUserById(rfq.originatorId);
+        if (originator) {
+          notifier.notify({
+            recipientSupabaseIds: [originator.supabaseId],
+            rfqId: input.rfqId,
+            type: 'quote_submitted',
+            title: `New quote @ ${input.price}`,
+            body: `${provider.fullName} quoted on ${rfq.reference}.`,
+            link: `/rfq/${input.rfqId}`,
+          });
+        }
+      }
+
+      const row = getQuoteStmt.get(id);
+      if (!row) throw new Error('quote insert succeeded but row missing');
+      return rowToQuote(row);
+    },
+
+    counterQuote(input) {
+      const rfq = this.getRfq(input.rfqId);
+      if (!rfq) throw new OtcError('not_found', 'rfq not found', 404);
+      if (!['OpenForQuotes', 'Negotiating'].includes(rfq.status)) {
+        throw new OtcError(
+          'invalid_state',
+          `cannot counter on an RFQ in state ${rfq.status}`,
+          409,
+        );
+      }
+      const parent = getQuoteStmt.get(input.parentQuoteId);
+      if (!parent || parent.rfq_id !== input.rfqId) {
+        throw new OtcError('not_found', 'parent quote not found', 404);
+      }
+      const actor = this.getUserById(input.actorId);
+      if (!actor) throw new OtcError('not_found', 'actor not found', 404);
+      // Counter: either the originator OR the original quoter (provider) on
+      // this thread. Both sides can keep the dance going.
+      if (actor.id !== rfq.originatorId && actor.id !== parent.provider_id) {
+        throw new OtcError(
+          'forbidden',
+          'only the originator or the quoter on this thread can counter',
+          403,
+        );
+      }
+
+      // Per-deal wallet binding: validate the snapshot for the chain the
+      // ACTOR will receive on (originator and counterparty receive opposite
+      // chains, so role determines which fields are required).
+      const role = actor.id === rfq.originatorId ? 'originator' : 'counterparty';
+      const receiveChain = receiveChainFor(rfq.side, role);
+      const snapshot = validateWalletSnapshot(input.walletSnapshot, receiveChain);
+
+      const now = Date.now();
+      // Mark parent Countered.
+      updateQuoteStatusStmt.run('Countered' as QuoteStatus, now, parent.id);
+
+      const id = randomUUID();
+      insertQuoteStmt.run({
+        id,
+        rfq_id: input.rfqId,
+        provider_id: parent.provider_id,
+        provider_name: parent.provider_name,
+        version: parent.version + 1,
+        parent_quote_id: parent.id,
+        price: input.price,
+        sell_amount: rfq.sellAmount,
+        buy_amount: input.buyAmount,
+        status: 'Submitted' as QuoteStatus,
+        note: input.note ?? null,
+        submitted_by_user_id: actor.id,
+        submitted_by_name: actor.fullName,
+        quoter_wallet_snapshot: JSON.stringify(snapshot),
+        created_at: now,
+        updated_at: now,
+      });
+
+      if (rfq.status === 'OpenForQuotes') {
+        db.prepare<[number, string]>(
+          "UPDATE rfqs SET status = 'Negotiating', updated_at = ? WHERE id = ?",
+        ).run(now, input.rfqId);
+      }
+      insertActivityImpl(
+        input.rfqId,
+        'QUOTE_COUNTERED',
+        actor.id,
+        actor.fullName,
+        `Countered @ ${input.price}`,
+        id,
+      );
+
+      // Bell fanout: notify the OTHER thread participant. If originator
+      // countered → notify the parent quote's provider; if provider countered
+      // → notify the originator. Self-counters can't happen (acceptance
+      // gating + thread membership above already enforces this).
+      if (notifier) {
+        const otherUserId = actor.id === rfq.originatorId ? parent.provider_id : rfq.originatorId;
+        const other = this.getUserById(otherUserId);
+        if (other) {
+          notifier.notify({
+            recipientSupabaseIds: [other.supabaseId],
+            rfqId: input.rfqId,
+            type: 'quote_countered',
+            title: `Counter @ ${input.price}`,
+            body: `${actor.fullName} countered on ${rfq.reference}.`,
+            link: `/rfq/${input.rfqId}`,
+          });
+        }
+      }
+
+      const row = getQuoteStmt.get(id);
+      if (!row) throw new Error('quote insert succeeded but row missing');
+      return rowToQuote(row);
+    },
+
+    acceptQuote(rfqId, quoteId, actorId) {
+      const rfq = this.getRfq(rfqId);
+      if (!rfq) throw new OtcError('not_found', 'rfq not found', 404);
+      if (rfq.originatorId !== actorId) {
+        throw new OtcError('forbidden', 'only the originator can accept a quote', 403);
+      }
+      const quote = getQuoteStmt.get(quoteId);
+      if (!quote || quote.rfq_id !== rfqId) {
+        throw new OtcError('not_found', 'quote not found', 404);
+      }
+
+      // The accepted quote MUST carry a wallet snapshot — submit/counter
+      // captured one from the connected session at the time. If absent,
+      // the quote was created under the legacy flow and can't be settled
+      // by the bridge; the originator would have to fall back to the paste
+      // path. Surface explicitly so the UI can prompt the quoter to resubmit.
+      if (!quote.quoter_wallet_snapshot) {
+        throw new OtcError(
+          'wallet_snapshot_missing',
+          'this quote has no wallet snapshot — ask the counterparty to re-submit',
+          409,
+        );
+      }
+
+      const now = Date.now();
+      const txn = db.transaction(() => {
+        // WHERE-guarded transition defeats double-accept races. If 0 rows
+        // changed, another tab beat us — surface 409.
+        const updateRfq = db
+          .prepare<{ now: number; quote_id: string; provider_id: string; provider_name: string; provider_email: string; price: string; provider_snap: string; rfq_id: string }>(`
+            UPDATE rfqs SET
+              status = 'QuoteSelected',
+              selected_quote_id = @quote_id,
+              selected_provider_id = @provider_id,
+              selected_provider_name = @provider_name,
+              selected_provider_email = @provider_email,
+              accepted_price = @price,
+              originator_wallet_snapshot = NULL,
+              provider_wallet_snapshot = @provider_snap,
+              updated_at = @now
+            WHERE id = @rfq_id AND status IN ('OpenForQuotes','Negotiating')
+          `)
+          .run({
+            now,
+            rfq_id: rfqId,
+            quote_id: quoteId,
+            provider_id: quote.provider_id,
+            provider_name: quote.provider_name,
+            provider_email: this.getUserById(quote.provider_id)?.email ?? '',
+            price: quote.price,
+            provider_snap: quote.quoter_wallet_snapshot!,
+          });
+        if (updateRfq.changes === 0) {
+          throw new OtcError(
+            'invalid_state',
+            'RFQ no longer accepts quotes (already selected or cancelled)',
+            409,
+          );
+        }
+        updateQuoteStatusStmt.run('Accepted' as QuoteStatus, now, quoteId);
+        updateQuotesByRfqExceptStmt.run('Rejected' as QuoteStatus, now, rfqId, quoteId);
+      });
+      txn();
+
+      insertActivityImpl(
+        rfqId,
+        'QUOTE_ACCEPTED',
+        actorId,
+        rfq.originatorName,
+        `Accepted quote from ${quote.provider_name} @ ${quote.price}`,
+        quoteId,
+      );
+
+      // Bell fanout: tell the winning quoter. Losing quoters get a
+      // QUOTE_REJECTED notification via the implicit-reject status flip,
+      // but we don't fan out for them here — the cascade is silent.
+      if (notifier) {
+        const quoter = this.getUserById(quote.provider_id);
+        if (quoter) {
+          notifier.notify({
+            recipientSupabaseIds: [quoter.supabaseId],
+            rfqId,
+            type: 'quote_accepted',
+            title: 'Your quote was accepted',
+            body: `${rfq.originatorName} accepted your quote on ${rfq.reference}. Awaiting maker lock.`,
+            link: `/rfq/${rfqId}`,
+          });
+        }
+      }
+
+      const updated = this.getRfq(rfqId);
+      if (!updated) throw new Error('rfq missing after accept');
+      return updated;
+    },
+
+    rejectQuote(rfqId, quoteId, actorId) {
+      const rfq = this.getRfq(rfqId);
+      if (!rfq) throw new OtcError('not_found', 'rfq not found', 404);
+      if (rfq.originatorId !== actorId) {
+        throw new OtcError('forbidden', 'only the originator can reject a quote', 403);
+      }
+      const quote = getQuoteStmt.get(quoteId);
+      if (!quote || quote.rfq_id !== rfqId) {
+        throw new OtcError('not_found', 'quote not found', 404);
+      }
+      updateQuoteStatusStmt.run('Rejected' as QuoteStatus, Date.now(), quoteId);
+      insertActivityImpl(
+        rfqId,
+        'QUOTE_REJECTED',
+        actorId,
+        rfq.originatorName,
+        `Rejected quote from ${quote.provider_name}`,
+        quoteId,
+      );
+
+      // Bell fanout: tell the rejected quoter so they don't keep waiting.
+      if (notifier) {
+        const quoter = this.getUserById(quote.provider_id);
+        if (quoter) {
+          notifier.notify({
+            recipientSupabaseIds: [quoter.supabaseId],
+            rfqId,
+            type: 'quote_rejected',
+            title: 'Quote rejected',
+            body: `${rfq.originatorName} rejected your quote on ${rfq.reference}.`,
+            link: `/rfq/${rfqId}`,
+          });
+        }
+      }
+
+      const updated = this.getRfq(rfqId);
+      if (!updated) throw new Error('rfq missing after reject');
+      return updated;
+    },
+
+    // ── Activity ──
+    listActivity(rfqId) {
+      return listActivityStmt.all(rfqId).map(rowToActivity);
+    },
+
+    insertActivity(rfqId, type, actorId, actorName, summary, relatedQuoteId) {
+      return insertActivityImpl(rfqId, type, actorId, actorName, summary, relatedQuoteId);
+    },
+
+    // ── SwapBridge (called by openSwapStore) ──
+    linkSwapToRfq(rfqId, swap) {
+      const rfqRow = getRfqStmt.get(rfqId);
+      if (!rfqRow) {
+        // RFQ was deleted between accept and lock — orphaned swap, log and proceed.
+        console.warn('[bridge] linkSwapToRfq: rfq not found', { rfqId, swapHash: swap.hash });
+        return;
+      }
+      const now = Date.now();
+      db.prepare<[string, number, string]>(
+        "UPDATE rfqs SET swap_hash = ?, status = 'Settling', updated_at = ? WHERE id = ?",
+      ).run(swap.hash, now, rfqId);
+      insertActivityImpl(
+        rfqId,
+        'SETTLEMENT_STARTED',
+        'system',
+        'system',
+        `Swap ${swap.hash.slice(0, 12)}… submitted on-chain by maker.`,
+      );
+
+      // Bell fanout: tell the selected counterparty their turn has started.
+      // Pre-compose the LP share URL server-side so the bell click lands
+      // them straight on the taker view of /swap with the existing reducer
+      // auto-starting — the literal answer to the user's complaint.
+      if (notifier && rfqRow.selected_provider_id) {
+        const provider = this.getUserById(rfqRow.selected_provider_id);
+        if (provider) {
+          const params = composeShareUrlParams(rowToRfq(rfqRow), swap);
+          notifier.notify({
+            recipientSupabaseIds: [provider.supabaseId],
+            rfqId,
+            type: 'settlement_started',
+            title: 'Counterparty locked — your turn',
+            body: `Maker has locked on ${rfqRow.reference}. Open the swap to settle.`,
+            link: `/swap?${params.toString()}`,
+            swapHash: swap.hash,
+          });
+        }
+      }
+    },
+
+    markRfqSettled(rfqId, swap) {
+      const rfqRow = getRfqStmt.get(rfqId);
+      if (!rfqRow) return;
+      // Don't regress from a terminal state.
+      if (rfqRow.status === 'Settled') return;
+      const now = Date.now();
+      db.prepare<[number, string]>(
+        "UPDATE rfqs SET status = 'Settled', updated_at = ? WHERE id = ?",
+      ).run(now, rfqId);
+      insertActivityImpl(
+        rfqId,
+        'SETTLEMENT_COMPLETED',
+        'system',
+        'system',
+        `Atomic swap ${swap.hash.slice(0, 12)}… completed.`,
+      );
+
+      // Bell fanout: both parties get a settled notification.
+      if (notifier) {
+        const originator = this.getUserById(rfqRow.originator_id);
+        const provider = rfqRow.selected_provider_id
+          ? this.getUserById(rfqRow.selected_provider_id)
+          : undefined;
+        const recipients = [originator?.supabaseId, provider?.supabaseId].filter(
+          (s): s is string => Boolean(s),
+        );
+        if (recipients.length > 0) {
+          notifier.notify({
+            recipientSupabaseIds: recipients,
+            rfqId,
+            type: 'settlement_completed',
+            title: 'Swap settled',
+            body: `${rfqRow.reference} completed atomically.`,
+            link: `/rfq/${rfqId}`,
+            swapHash: swap.hash,
+          });
+        }
+      }
+    },
+
+    onSwapStatusChange(rfqId, swap) {
+      // Pure fanout — no DB mutation. Called for every status patch on an
+      // RFQ-linked swap. `open` / `completed` are owned by linkSwapToRfq /
+      // markRfqSettled respectively and are skipped here to avoid double
+      // notifications.
+      if (!notifier) return;
+      if (swap.status === 'open' || swap.status === 'completed') return;
+
+      const rfqRow = getRfqStmt.get(rfqId);
+      if (!rfqRow) return;
+
+      const originator = this.getUserById(rfqRow.originator_id);
+      const provider = rfqRow.selected_provider_id
+        ? this.getUserById(rfqRow.selected_provider_id)
+        : undefined;
+      const both = [originator?.supabaseId, provider?.supabaseId].filter(
+        (s): s is string => Boolean(s),
+      );
+
+      switch (swap.status) {
+        case 'bob_deposited':
+          // Counterparty completed second-chain action; originator's turn to claim.
+          if (originator) {
+            notifier.notify({
+              recipientSupabaseIds: [originator.supabaseId],
+              rfqId,
+              type: 'swap_bob_deposited',
+              title: 'Counterparty acted — your turn to claim',
+              body: `Open ${rfqRow.reference} to reveal the preimage and claim.`,
+              link: `/rfq/${rfqId}`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        case 'alice_claimed':
+          // Originator revealed preimage; counterparty can now claim.
+          if (provider) {
+            notifier.notify({
+              recipientSupabaseIds: [provider.supabaseId],
+              rfqId,
+              type: 'swap_alice_claimed',
+              title: 'Preimage revealed — claim ready',
+              body: `Maker claimed on ${rfqRow.reference}. Read the preimage and claim your side.`,
+              link: `/rfq/${rfqId}`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        case 'expired':
+          if (both.length > 0) {
+            notifier.notify({
+              recipientSupabaseIds: both,
+              rfqId,
+              type: 'swap_expired',
+              title: 'Swap expired',
+              body: `${rfqRow.reference} expired without settlement. Reclaim if you locked.`,
+              link: `/reclaim`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        case 'alice_reclaimed':
+        case 'bob_reclaimed':
+          if (both.length > 0) {
+            notifier.notify({
+              recipientSupabaseIds: both,
+              rfqId,
+              type: 'swap_reclaimed',
+              title: 'Funds reclaimed',
+              body: `${rfqRow.reference} was reclaimed by ${
+                swap.status === 'alice_reclaimed' ? 'the maker' : 'the taker'
+              }.`,
+              link: `/rfq/${rfqId}`,
+              swapHash: swap.hash,
+            });
+          }
+          break;
+        default:
+          break;
+      }
     },
   };
 };

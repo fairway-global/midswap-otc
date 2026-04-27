@@ -43,6 +43,9 @@ jspm_packages/
 
 # dotenv environment variables file
 .env
+# Local-only env overrides (Vite convention; keep secrets here, never in tracked .env.preprod)
+*.local
+.env.*.local
 
 # Wallet keys (sensitive)
 address.json
@@ -80,3 +83,14 @@ pending-swap.json
 # Compact
 managed/
 .vercel
+
+Mcardano/
+Mcardano
+Midnight Logo/
+Midnight Logo
+MKaamos/
+MKaamos
+USDM/
+USDM
+
+deploy.md

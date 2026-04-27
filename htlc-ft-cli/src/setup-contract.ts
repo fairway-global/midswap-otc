@@ -64,6 +64,7 @@ const TOKEN_SYMBOL = 'USDC';
 const TOKEN_DECIMALS = 6n;
 const DOMAIN_SEP_SOURCE = 'midnight-usdc-v1';
 const MINT_PER_PARTICIPANT = 10_000n; // 10,000 USDC each
+const USDM_PER_PARTICIPANT = 10_000n; // 10,000 USDM each on Cardano
 
 function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
@@ -184,6 +185,48 @@ async function main() {
   const htlcAddr = htlc.deployTxData.public.contractAddress;
   console.log(`  HTLC @ ${htlcAddr}`);
 
+  // ── Seed-mint USDM on Cardano ──
+  // Permissionless always-true policy — any connected wallet can mint.
+  // We mint to both Alice and Bob so the CLI regression path (execute-swap.ts)
+  // can run without the demo participants having to hit /mint-usdm first.
+  let usdmPolicyId = '';
+  try {
+    const blockfrostApiKey = process.env.BLOCKFROST_API_KEY;
+    if (!blockfrostApiKey) {
+      console.log('\nSkipping USDM seed-mint: BLOCKFROST_API_KEY not set.');
+    } else {
+      console.log('\n── Seed-minting USDM on Cardano ──');
+      const { CardanoHTLC, loadUsdmPolicy, mintUsdm } = await import('./cardano-htlc');
+      const blueprintPath = path.resolve(scriptDir, '..', '..', 'cardano', 'plutus.json');
+      const cardanoConfig = {
+        blockfrostUrl: 'https://cardano-preprod.blockfrost.io/api/v0',
+        blockfrostApiKey,
+        network: 'Preprod' as const,
+        blueprintPath,
+      };
+      const usdmPolicy = loadUsdmPolicy(blueprintPath);
+      usdmPolicyId = usdmPolicy.policyId;
+      console.log(`  USDM policyId: ${usdmPolicyId}`);
+
+      for (const [name, wallets] of Object.entries(addresses) as [string, any][]) {
+        const mnemonic = wallets.cardano?.mnemonic;
+        if (!mnemonic) {
+          console.log(`  (skip ${name}: no cardano.mnemonic in address.json)`);
+          continue;
+        }
+        const c = await CardanoHTLC.init(cardanoConfig, logger);
+        c.selectWalletFromSeed(mnemonic);
+        const self = await c.getWalletAddress();
+        console.log(`  Minting ${USDM_PER_PARTICIPANT} USDM to ${name} (${self.slice(0, 16)}…)`);
+        const tx = await mintUsdm(c.lucid, usdmPolicy, self, USDM_PER_PARTICIPANT);
+        console.log(`    tx: ${tx}`);
+      }
+    }
+  } catch (e) {
+    // Non-fatal — Midnight side succeeded; user can still /mint-usdm manually.
+    console.warn('  USDM seed-mint failed (non-fatal):', e instanceof Error ? e.message : e);
+  }
+
   // Save swap state
   const swapStatePath = path.resolve(scriptDir, '..', 'swap-state.json');
   const swapState = {
@@ -194,6 +237,8 @@ async function main() {
     tokenSymbol: TOKEN_SYMBOL,
     tokenDecimals: Number(TOKEN_DECIMALS),
     domainSepHex: bytesToHex(domainSep),
+    usdmPolicyId,
+    usdmAssetNameHex: '5553444d',
     deployedAt: new Date().toISOString(),
     network: getMidnightNetwork(),
   };

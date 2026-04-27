@@ -119,7 +119,13 @@ export default defineConfig({
       '@midnight-ntwrk/onchain-runtime-v3/midnight_onchain_runtime_wasm.js',
     ],
   },
-  define: {},
+  // Build-time constants. `__BUILD_TIME__` gives us a cheap way to verify
+  // at runtime that the browser is loading the freshly-built bundle (not a
+  // cached one). Logged at app boot in main.tsx; also rendered in the
+  // Header as a tiny muted timestamp chip.
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   // Add specific import configuration for more control
   resolve: {
     // Ensure WASM files are loaded properly

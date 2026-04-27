@@ -117,27 +117,26 @@ async function main() {
 
   console.log('╔══════════════════════════════════════════════════════════╗');
   console.log('║          ALICE — Cross-Chain Swap (Initiator)           ║');
-  console.log('║          ADA (Cardano) → USDC (Midnight, native)        ║');
+  console.log('║          USDM (Cardano) → USDC (Midnight, native)       ║');
   console.log('╚══════════════════════════════════════════════════════════╝\n');
   console.log(`HTLC Contract: ${swapState.htlcContractAddress}`);
   console.log(`USDC Contract: ${swapState.usdcContractAddress}`);
   console.log(`USDC Color:    ${swapState.usdcColor}\n`);
 
-  let adaAmountStr: string;
+  let usdmAmountStr: string;
   let usdcAmount: bigint;
   let deadlineMinStr: string;
   if (autoAccept) {
-    adaAmountStr = process.env.ALICE_ADA ?? '10';
-    usdcAmount = BigInt(process.env.ALICE_USDC ?? adaAmountStr);
+    usdmAmountStr = process.env.ALICE_USDM ?? process.env.ALICE_ADA ?? '10';
+    usdcAmount = BigInt(process.env.ALICE_USDC ?? usdmAmountStr);
     deadlineMinStr = process.env.ALICE_DEADLINE_MIN ?? '120';
-    console.log(`Auto-accept: ada=${adaAmountStr}, usdc=${usdcAmount}, deadline=${deadlineMinStr}min`);
+    console.log(`Auto-accept: usdm=${usdmAmountStr}, usdc=${usdcAmount}, deadline=${deadlineMinStr}min`);
   } else {
-    adaAmountStr = (await rli!.question('ADA amount to swap [10]: ')) || '10';
-    usdcAmount = BigInt((await rli!.question(`USDC amount to receive [${adaAmountStr}]: `)) || adaAmountStr);
+    usdmAmountStr = (await rli!.question('USDM amount to swap [10]: ')) || '10';
+    usdcAmount = BigInt((await rli!.question(`USDC amount to receive [${usdmAmountStr}]: `)) || usdmAmountStr);
     deadlineMinStr = (await rli!.question('Cardano deadline in minutes [120]: ')) || '120';
   }
-  const adaAmount = BigInt(adaAmountStr);
-  const lovelaceAmount = adaAmount * 1_000_000n;
+  const usdmAmount = BigInt(usdmAmountStr);
   const deadlineMin = parseInt(deadlineMinStr);
 
   // Bob's safety gate rejects anything under 30 min; on preprod he also spends
@@ -189,19 +188,22 @@ async function main() {
   console.log('Joined HTLC contract.');
 
   console.log('Building Cardano wallet...');
-  const { CardanoHTLC: CardanoHTLCClass } = await import('./cardano-htlc');
+  const { CardanoHTLC: CardanoHTLCClass, loadUsdmPolicy } = await import('./cardano-htlc');
+  const blueprintPath = path.resolve(scriptDir, '..', '..', 'cardano', 'plutus.json');
   const aliceCardano = await CardanoHTLCClass.init({
     blockfrostUrl: 'https://cardano-preprod.blockfrost.io/api/v0',
     blockfrostApiKey,
     network: 'Preprod' as const,
-    blueprintPath: path.resolve(scriptDir, '..', '..', 'cardano', 'plutus.json'),
+    blueprintPath,
   }, logger);
   aliceCardano.selectWalletFromSeed(addresses.alice.cardano.mnemonic);
+  const usdmPolicy = loadUsdmPolicy(blueprintPath);
   const adaBal = await aliceCardano.getBalance();
-  console.log(`Cardano balance: ${Number(adaBal) / 1e6} ADA`);
+  console.log(`Cardano balance: ${Number(adaBal) / 1e6} ADA (for fees & min-UTxO)`);
+  console.log(`USDM policyId: ${usdmPolicy.policyId}`);
 
-  // ── Lock ADA on Cardano ──
-  console.log('\n── Locking ADA on Cardano ──');
+  // ── Lock USDM on Cardano ──
+  console.log('\n── Locking USDM on Cardano ──');
 
   const preimage = crypto.randomBytes(32);
   const hashLock = sha256(preimage);
@@ -214,8 +216,8 @@ async function main() {
   const deadlineMs = BigInt(Date.now() + deadlineMin * 60 * 1000);
   const bobPkh = addresses.bob.cardano.paymentKeyHash;
 
-  console.log(`Locking ${adaAmount} ADA for Bob (deadline: ${deadlineMin}min)...`);
-  const lockTxHash = await aliceCardano.lock(lovelaceAmount, hashHex, bobPkh, deadlineMs);
+  console.log(`Locking ${usdmAmount} USDM for Bob (deadline: ${deadlineMin}min)...`);
+  const lockTxHash = await aliceCardano.lock(usdmAmount, usdmPolicy.unit, hashHex, bobPkh, deadlineMs);
   console.log(`Lock tx: ${lockTxHash}`);
 
   // Publish the hash so Bob's watcher can lock onto this specific HTLC instead
@@ -228,7 +230,7 @@ async function main() {
       {
         hashHex,
         lockTxHash,
-        adaAmount: adaAmount.toString(),
+        usdmAmount: usdmAmount.toString(),
         deadlineMs: deadlineMs.toString(),
         aliceCoinPublicKey,
         createdAt: new Date().toISOString(),
@@ -290,7 +292,7 @@ async function main() {
   console.log('\n╔══════════════════════════════════════════════════════════╗');
   console.log('║              ALICE SWAP COMPLETE                        ║');
   console.log('╠══════════════════════════════════════════════════════════╣');
-  console.log(`║  Sent:     ${adaAmount} ADA on Cardano`);
+  console.log(`║  Sent:     ${usdmAmount} ADA on Cardano`);
   console.log(`║  Received: ${deposit.amount} USDC on Midnight (native)`);
   console.log(`║  Hash:     ${hashHex.slice(0, 32)}...`);
   console.log('╚══════════════════════════════════════════════════════════╝');

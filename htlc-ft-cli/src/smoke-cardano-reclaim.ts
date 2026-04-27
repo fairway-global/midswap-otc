@@ -10,9 +10,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createLogger } from './logger-utils.js';
-import { CardanoHTLC } from './cardano-htlc';
+import { CardanoHTLC, loadUsdmPolicy } from './cardano-htlc';
 
-const LOCK_LOVELACE = 2_000_000n; // 2 ADA
+const LOCK_USDM = 1n; // 1 USDM (integer units)
 const DEADLINE_SECS = 90;         // short but lucid-validateable
 const POLL_INTERVAL_MS = 10_000;
 const CONFIRM_TIMEOUT_MS = 180_000; // 3 min max wait for lock confirmation
@@ -100,17 +100,18 @@ async function main() {
     logger,
   );
   htlc.selectWalletFromSeed(addresses.alice.cardano.mnemonic);
+  const usdmPolicy = loadUsdmPolicy(path.resolve(scriptDir, '..', '..', 'cardano', 'plutus.json'));
 
   const balanceBefore = await htlc.getBalance();
-  console.log(`Alice balance before: ${Number(balanceBefore) / 1e6} ADA`);
+  console.log(`Alice balance before: ${Number(balanceBefore) / 1e6} ADA (for fees & min-UTxO)`);
 
   const preimage = crypto.randomBytes(32);
   const hashHex = sha256Hex(preimage);
   const deadlineMs = BigInt(Date.now() + DEADLINE_SECS * 1000);
 
-  console.log(`Locking ${Number(LOCK_LOVELACE) / 1e6} ADA (hash=${hashHex.slice(0, 16)}…, deadline in ${DEADLINE_SECS}s)…`);
+  console.log(`Locking ${LOCK_USDM} USDM (hash=${hashHex.slice(0, 16)}…, deadline in ${DEADLINE_SECS}s)…`);
   const receiverPkh = addresses.bob.cardano.paymentKeyHash;
-  const lockTx = await htlc.lock(LOCK_LOVELACE, hashHex, receiverPkh, deadlineMs);
+  const lockTx = await htlc.lock(LOCK_USDM, usdmPolicy.unit, hashHex, receiverPkh, deadlineMs);
   console.log(`  Lock tx: ${lockTx}`);
 
   await waitForLockConfirmed(htlc, hashHex);
@@ -130,7 +131,9 @@ async function main() {
   console.log(`Alice balance after:  ${Number(balanceAfter) / 1e6} ADA`);
   console.log(`Net cost (fees only): ${Number(delta) / 1e6} ADA`);
 
-  if (delta > LOCK_LOVELACE / 2n) {
+  // Net ADA cost should be tx fees only — the min-UTxO rides back on reclaim.
+  // Allow up to 1 ADA delta for two signed transactions' worth of fees.
+  if (delta > 1_000_000n) {
     throw new Error(
       `Balance delta too large: ${delta} lovelace. Expected fees only (~0.5 ADA), got ${Number(delta) / 1e6} ADA.`,
     );

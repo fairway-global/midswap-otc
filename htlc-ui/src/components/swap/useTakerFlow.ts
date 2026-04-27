@@ -1,6 +1,6 @@
 /**
  * Taker flow hook — watch Cardano for the maker's lock, deposit USDC on
- * Midnight, wait for the preimage reveal, claim ADA on Cardano.
+ * Midnight, wait for the preimage reveal, claim USDM on Cardano.
  *
  * Extracted 1:1 from the original BobSwap component. Safety checks against
  * CLAUDE.md §11 (bech32m decoding, `watchForCardanoLock` filter signature,
@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useReducer } from 'react';
+import { firstValueFrom } from 'rxjs';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { watchForCardanoLock, type CardanoHTLCInfo } from '../../api/cardano-watcher';
@@ -21,7 +22,7 @@ export interface URLInputs {
   readonly aliceCpkHex: string;
   readonly aliceUnshieldedHex: string;
   readonly cardanoDeadlineMs: bigint;
-  readonly adaAmount: bigint;
+  readonly usdmAmount: bigint;
   readonly usdcAmount: bigint;
 }
 
@@ -31,10 +32,10 @@ export type TakerStep =
   | { kind: 'confirm'; url: URLInputs; htlcInfo: CardanoHTLCInfo; bobDeadlineSecs: bigint; truncated: boolean }
   | { kind: 'unsafe-deadline'; url: URLInputs; htlcInfo: CardanoHTLCInfo; reason: string }
   | { kind: 'depositing'; url: URLInputs; htlcInfo: CardanoHTLCInfo; bobDeadlineSecs: bigint }
-  | { kind: 'waiting-preimage'; url: URLInputs; htlcInfo: CardanoHTLCInfo }
-  | { kind: 'claim-ready'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string }
-  | { kind: 'claiming'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string }
-  | { kind: 'done'; url: URLInputs; htlcInfo: CardanoHTLCInfo; claimTxHash: string }
+  | { kind: 'waiting-preimage'; url: URLInputs; htlcInfo: CardanoHTLCInfo; depositTxHash?: string }
+  | { kind: 'claim-ready'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string; depositTxHash?: string }
+  | { kind: 'claiming'; url: URLInputs; htlcInfo: CardanoHTLCInfo; preimageHex: string; depositTxHash?: string }
+  | { kind: 'done'; url: URLInputs; htlcInfo: CardanoHTLCInfo; claimTxHash: string; depositTxHash?: string }
   | { kind: 'error'; message: string; url?: URLInputs };
 
 type TakerAction =
@@ -42,12 +43,17 @@ type TakerAction =
   | { t: 'lock-seen'; htlcInfo: CardanoHTLCInfo; bobDeadlineSecs: bigint; truncated: boolean }
   | { t: 'unsafe'; reason: string; htlcInfo: CardanoHTLCInfo }
   | { t: 'to-depositing' }
-  | { t: 'to-waiting-preimage' }
+  | { t: 'to-waiting-preimage'; depositTxHash?: string }
   | { t: 'preimage-seen'; preimageHex: string }
   | { t: 'to-claiming' }
   | { t: 'to-done'; claimTxHash: string }
   | { t: 'error'; message: string }
-  | { t: 'reset' };
+  | { t: 'reset' }
+  // Resume paths — on page reload, if on-chain state is ahead of the UI
+  // state, jump straight to the right step instead of re-prompting the user
+  // to deposit again.
+  | { t: 'resume-to-waiting-preimage'; htlcInfo: CardanoHTLCInfo }
+  | { t: 'resume-to-claim-ready'; htlcInfo: CardanoHTLCInfo; preimageHex: string };
 
 const reducer = (state: TakerStep, action: TakerAction): TakerStep => {
   switch (action.t) {
@@ -73,24 +79,55 @@ const reducer = (state: TakerStep, action: TakerAction): TakerStep => {
         : state;
     case 'to-waiting-preimage':
       return state.kind === 'depositing'
-        ? { kind: 'waiting-preimage', url: state.url, htlcInfo: state.htlcInfo }
+        ? {
+            kind: 'waiting-preimage',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            depositTxHash: action.depositTxHash,
+          }
         : state;
     case 'preimage-seen':
       return state.kind === 'waiting-preimage'
-        ? { kind: 'claim-ready', url: state.url, htlcInfo: state.htlcInfo, preimageHex: action.preimageHex }
+        ? {
+            kind: 'claim-ready',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            preimageHex: action.preimageHex,
+            depositTxHash: state.depositTxHash,
+          }
         : state;
     case 'to-claiming':
       return state.kind === 'claim-ready'
-        ? { kind: 'claiming', url: state.url, htlcInfo: state.htlcInfo, preimageHex: state.preimageHex }
+        ? {
+            kind: 'claiming',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            preimageHex: state.preimageHex,
+            depositTxHash: state.depositTxHash,
+          }
         : state;
     case 'to-done':
       return state.kind === 'claiming'
-        ? { kind: 'done', url: state.url, htlcInfo: state.htlcInfo, claimTxHash: action.claimTxHash }
+        ? {
+            kind: 'done',
+            url: state.url,
+            htlcInfo: state.htlcInfo,
+            claimTxHash: action.claimTxHash,
+            depositTxHash: state.depositTxHash,
+          }
         : state;
     case 'error':
       return { kind: 'error', message: action.message, url: 'url' in state ? state.url : undefined };
     case 'reset':
       return { kind: 'idle' };
+    case 'resume-to-waiting-preimage':
+      return state.kind === 'watching-cardano'
+        ? { kind: 'waiting-preimage', url: state.url, htlcInfo: action.htlcInfo }
+        : state;
+    case 'resume-to-claim-ready':
+      return state.kind === 'watching-cardano'
+        ? { kind: 'claim-ready', url: state.url, htlcInfo: action.htlcInfo, preimageHex: action.preimageHex }
+        : state;
     default:
       return state;
   }
@@ -121,20 +158,21 @@ export const parseUrlInputs = (params: URLSearchParams): URLInputs | { error: st
   const aliceCpkHex = (params.get('aliceCpk') ?? '').trim().toLowerCase();
   const aliceUnshieldedHex = (params.get('aliceUnshielded') ?? '').trim().toLowerCase();
   const cardanoDeadlineMs = params.get('cardanoDeadlineMs');
-  const adaAmount = params.get('adaAmount');
+  // Read-side alias: older URLs carry `adaAmount` — accept as fallback.
+  const usdmAmount = params.get('usdmAmount') ?? params.get('adaAmount');
   const usdcAmount = params.get('usdcAmount');
   if (!hashHex || !/^[0-9a-f]{64}$/.test(hashHex)) return { error: 'Missing or invalid hash (64 hex).' };
   if (!aliceCpkHex || !/^[0-9a-f]{64}$/.test(aliceCpkHex)) return { error: 'Missing or invalid maker key (64 hex).' };
   if (!aliceUnshieldedHex || !/^[0-9a-f]{64}$/.test(aliceUnshieldedHex))
     return { error: 'Missing or invalid maker unshielded address (64 hex).' };
-  if (!cardanoDeadlineMs || !adaAmount || !usdcAmount)
-    return { error: 'Missing cardanoDeadlineMs / adaAmount / usdcAmount.' };
+  if (!cardanoDeadlineMs || !usdmAmount || !usdcAmount)
+    return { error: 'Missing cardanoDeadlineMs / usdmAmount / usdcAmount.' };
   return {
     hashHex,
     aliceCpkHex,
     aliceUnshieldedHex,
     cardanoDeadlineMs: BigInt(cardanoDeadlineMs),
-    adaAmount: BigInt(adaAmount),
+    usdmAmount: BigInt(usdmAmount),
     usdcAmount: BigInt(usdcAmount),
   };
 };
@@ -160,11 +198,50 @@ export const useTakerFlow = (): UseTakerFlow => {
       try {
         const htlcInfo = await watchForCardanoLock(
           cardano.cardanoHtlc,
+          cardano.usdmPolicy.unit,
           cardano.paymentKeyHash,
           10_000,
           state.url.hashHex,
           controller.signal,
         );
+
+        // Resume fast-path: if the taker already deposited in a previous
+        // session (page reload / tab close), on-chain state is already ahead
+        // of the UI. Read the Midnight HTLC entry and jump straight to the
+        // right step instead of re-prompting "Deposit USDC".
+        //   • revealedPreimage set  → maker already claimed → claim-ready
+        //   • amount > 0 (bound to aliceCpk) → deposit landed → waiting-preimage
+        //   • otherwise → normal confirm flow
+        if (session) {
+          try {
+            const derived = await firstValueFrom(session.htlcApi.state$);
+            if (controller.signal.aborted) return;
+            const entry = derived.entries.get(state.url.hashHex);
+            if (entry) {
+              const receiverCpk = bytesToHex(entry.receiverAuth).toLowerCase();
+              const expectedAliceCpk = state.url.aliceCpkHex.toLowerCase();
+              if (receiverCpk === expectedAliceCpk) {
+                if (entry.revealedPreimage) {
+                  dispatch({
+                    t: 'resume-to-claim-ready',
+                    htlcInfo,
+                    preimageHex: bytesToHex(entry.revealedPreimage),
+                  });
+                  return;
+                }
+                if (entry.amount > 0n) {
+                  dispatch({ t: 'resume-to-waiting-preimage', htlcInfo });
+                  return;
+                }
+              }
+            }
+          } catch (e) {
+            // Non-fatal: fall through to normal confirm flow — the user can
+            // still proceed via the verify-on-error deposit path.
+            console.warn('[useTakerFlow] resume check failed', e);
+          }
+        }
+
         const nowSecs = Math.floor(Date.now() / 1000);
         const cardanoDeadlineSecs = Math.floor(Number(htlcInfo.deadlineMs) / 1000);
         const cardanoRemaining = cardanoDeadlineSecs - nowSecs;
@@ -224,9 +301,10 @@ export const useTakerFlow = (): UseTakerFlow => {
       const bobUnshieldedBytes = session.bootstrap.unshieldedAddressBytes;
       const usdcColor = hexToBytes(swapState.usdcColor);
 
+      let depositTxHash: string | undefined;
       let submitError: unknown;
       try {
-        await session.htlcApi.deposit({
+        depositTxHash = await session.htlcApi.deposit({
           color: usdcColor,
           amount: state.url.usdcAmount,
           hash: hashBytes,
@@ -282,10 +360,11 @@ export const useTakerFlow = (): UseTakerFlow => {
             bobUnshielded: session.bootstrap.unshieldedAddressHex,
             bobPkh: cardano?.paymentKeyHash,
             midnightDeadlineMs: Number(state.bobDeadlineSecs) * 1000,
+            ...(depositTxHash ? { midnightDepositTx: depositTxHash } : {}),
           }),
         'patchSwap bob_deposited',
       );
-      dispatch({ t: 'to-waiting-preimage' });
+      dispatch({ t: 'to-waiting-preimage', depositTxHash });
     })();
   }, [state, session, cardano, swapState.usdcColor, toast]);
 

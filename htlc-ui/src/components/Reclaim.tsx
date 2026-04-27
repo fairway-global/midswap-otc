@@ -1,7 +1,7 @@
 /**
  * /reclaim — list-driven refund panel powered by the orchestrator.
  *
- *   • Reclaim ADA on Cardano — for swaps where you locked ADA and the maker
+ *   • Reclaim USDM on Cardano — for swaps where you locked USDM and the maker
  *     deadline has passed. Handles open + bob_deposited states.
  *   • Reclaim USDC on Midnight — for swaps where you deposited USDC and the
  *     taker deadline has passed.
@@ -36,7 +36,7 @@ import { hexToBytes } from '../api/key-encoding';
 import { orchestratorClient, type Swap } from '../api/orchestrator-client';
 import { SwapStatusChip } from './SwapStatusChip';
 import { TokenBadge } from './swap/TokenBadge';
-import { ADA, USDC } from './swap/tokens';
+import { USDM, USDC } from './swap/tokens';
 
 type RowStatus =
   | { kind: 'idle' }
@@ -44,13 +44,13 @@ type RowStatus =
   | { kind: 'done'; detail?: string }
   | { kind: 'error'; message: string };
 
-type ManualAdaStatus =
+type ManualUsdmStatus =
   | { kind: 'idle' }
   | { kind: 'inspecting' }
   | { kind: 'not-found' }
-  | { kind: 'found'; lovelace: bigint; deadlineMs: bigint; expired: boolean }
+  | { kind: 'found'; usdmQty: bigint; deadlineMs: bigint; expired: boolean }
   | { kind: 'reclaiming' }
-  | { kind: 'done'; txHash: string; lovelace: bigint }
+  | { kind: 'done'; txHash: string; usdmQty: bigint }
   | { kind: 'error'; message: string };
 
 type ManualUsdcStatus =
@@ -118,16 +118,16 @@ export const Reclaim: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
-  const { adaReclaimable, usdcReclaimable } = useMemo(() => {
-    if (!swaps) return { adaReclaimable: [] as Swap[], usdcReclaimable: [] as Swap[] };
+  const { usdmReclaimable, usdcReclaimable } = useMemo(() => {
+    if (!swaps) return { usdmReclaimable: [] as Swap[], usdcReclaimable: [] as Swap[] };
 
-    // "ADA reclaimable" = you locked ADA on Cardano, the deadline passed, and
-    // the lock still exists on-chain.
-    //   ada-usdc: maker locks ADA (aliceCpk match identifies the user).
-    //   usdc-ada: taker locks ADA (bobPkh match identifies the user).
+    // "USDM reclaimable" = you locked USDM on Cardano, the deadline passed,
+    // and the lock still exists on-chain.
+    //   usdm-usdc: maker locks USDM (aliceCpk match identifies the user).
+    //   usdc-usdm: taker locks USDM (bobPkh match identifies the user).
     const ada = swaps.filter((s) => {
       if (s.cardanoDeadlineMs === null || s.cardanoDeadlineMs >= nowMs) return false;
-      if (s.direction === 'ada-usdc') {
+      if (s.direction === 'usdm-usdc') {
         return (s.status === 'open' || s.status === 'bob_deposited') && (!myCpk || s.aliceCpk.toLowerCase() === myCpk);
       }
       return s.status === 'bob_deposited' && (!myPkh || s.bobPkh?.toLowerCase() === myPkh);
@@ -139,15 +139,15 @@ export const Reclaim: React.FC = () => {
     //   usdc-ada: maker deposited USDC (aliceCpk match).
     const usdc = swaps.filter((s) => {
       if (s.midnightDeadlineMs === null || s.midnightDeadlineMs >= nowMs) return false;
-      if (s.direction === 'ada-usdc') {
+      if (s.direction === 'usdm-usdc') {
         return s.status === 'bob_deposited' && (!myCpk || s.bobCpk?.toLowerCase() === myCpk);
       }
       return (s.status === 'open' || s.status === 'bob_deposited') && (!myCpk || s.aliceCpk.toLowerCase() === myCpk);
     });
-    return { adaReclaimable: ada, usdcReclaimable: usdc };
+    return { usdmReclaimable: ada, usdcReclaimable: usdc };
   }, [swaps, nowMs, myCpk, myPkh]);
 
-  const reclaimAdaRow = useCallback(
+  const reclaimUsdmRow = useCallback(
     async (swap: Swap): Promise<void> => {
       if (!cardano) {
         setRow(swap.hash, { kind: 'error', message: 'Connect your Cardano wallet first.' });
@@ -188,11 +188,11 @@ export const Reclaim: React.FC = () => {
   const prefillHash = (searchParams.get('hash') ?? '').trim().toLowerCase();
   const [hashInput, setHashInput] = useState<string>(prefillHash);
   const hashValid = /^[0-9a-f]{64}$/.test(hashInput);
-  const [adaStatus, setAdaStatus] = useState<ManualAdaStatus>({ kind: 'idle' });
+  const [usdmStatus, setUsdmStatus] = useState<ManualUsdmStatus>({ kind: 'idle' });
   const [usdcStatus, setUsdcStatus] = useState<ManualUsdcStatus>({ kind: 'idle' });
 
   useEffect(() => {
-    setAdaStatus({ kind: 'idle' });
+    setUsdmStatus({ kind: 'idle' });
     setUsdcStatus({ kind: 'idle' });
   }, [hashInput]);
 
@@ -200,38 +200,38 @@ export const Reclaim: React.FC = () => {
     if (prefillHash) setShowManual(true);
   }, [prefillHash]);
 
-  const manualInspectAda = useCallback(async () => {
+  const manualInspectUsdm = useCallback(async () => {
     if (!cardano || !hashValid) return;
-    setAdaStatus({ kind: 'inspecting' });
+    setUsdmStatus({ kind: 'inspecting' });
     try {
       const utxo = await cardano.cardanoHtlc.findHTLCUtxo(hashInput);
-      if (!utxo) return setAdaStatus({ kind: 'not-found' });
+      if (!utxo) return setUsdmStatus({ kind: 'not-found' });
       const htlcs = await cardano.cardanoHtlc.listHTLCs();
       const found = htlcs.find((h) => h.datum.preimageHash === hashInput);
-      if (!found) return setAdaStatus({ kind: 'not-found' });
-      setAdaStatus({
+      if (!found) return setUsdmStatus({ kind: 'not-found' });
+      setUsdmStatus({
         kind: 'found',
-        lovelace: utxo.assets.lovelace ?? 0n,
+        usdmQty: utxo.assets[cardano.usdmPolicy.unit] ?? 0n,
         deadlineMs: found.datum.deadline,
         expired: Date.now() >= Number(found.datum.deadline),
       });
     } catch (e) {
-      setAdaStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+      setUsdmStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   }, [cardano, hashInput, hashValid]);
 
-  const manualReclaimAda = useCallback(async () => {
-    if (!cardano || adaStatus.kind !== 'found' || !adaStatus.expired) return;
-    const lovelace = adaStatus.lovelace;
-    setAdaStatus({ kind: 'reclaiming' });
+  const manualReclaimUsdm = useCallback(async () => {
+    if (!cardano || usdmStatus.kind !== 'found' || !usdmStatus.expired) return;
+    const usdmQty = usdmStatus.usdmQty;
+    setUsdmStatus({ kind: 'reclaiming' });
     try {
       const txHash = await cardano.cardanoHtlc.reclaim(hashInput);
-      setAdaStatus({ kind: 'done', txHash, lovelace });
+      setUsdmStatus({ kind: 'done', txHash, usdmQty });
       void refresh();
     } catch (e) {
-      setAdaStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
+      setUsdmStatus({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
     }
-  }, [cardano, hashInput, adaStatus, refresh]);
+  }, [cardano, hashInput, usdmStatus, refresh]);
 
   const manualInspectUsdc = useCallback(async () => {
     if (!session || !hashValid) return;
@@ -266,7 +266,7 @@ export const Reclaim: React.FC = () => {
     }
   }, [session, hashInput, usdcStatus, refresh]);
 
-  const totalReclaimable = adaReclaimable.length + usdcReclaimable.length;
+  const totalReclaimable = usdmReclaimable.length + usdcReclaimable.length;
 
   return (
     <Stack spacing={3} sx={{ width: '100%', maxWidth: 860, mx: 'auto' }}>
@@ -323,21 +323,21 @@ export const Reclaim: React.FC = () => {
         </Box>
       )}
 
-      {/* ADA reclaim section */}
-      {adaReclaimable.length > 0 && (
+      {/* USDM reclaim section */}
+      {usdmReclaimable.length > 0 && (
         <Section
-          icon={<TokenBadge token={ADA} size={28} />}
-          title="Refund ADA on Cardano"
+          icon={<TokenBadge token={USDM} size={28} />}
+          title="Refund USDM on Cardano"
           subtitle="Locks you made whose maker-side deadline has elapsed."
-          count={adaReclaimable.length}
+          count={usdmReclaimable.length}
         >
-          {adaReclaimable.map((swap) => (
+          {usdmReclaimable.map((swap) => (
             <ReclaimRow
               key={swap.hash}
               swap={swap}
               rowStatus={rowStatuses.get(swap.hash) ?? { kind: 'idle' }}
-              side="ada"
-              onReclaim={() => void reclaimAdaRow(swap)}
+              side="usdm"
+              onReclaim={() => void reclaimUsdmRow(swap)}
               disabled={!cardano}
               disabledReason="Connect Cardano wallet"
             />
@@ -398,42 +398,42 @@ export const Reclaim: React.FC = () => {
           </Box>
 
           <ManualChainPanel
-            title="Cardano HTLC — refund ADA"
-            onInspect={() => void manualInspectAda()}
-            onReclaim={() => void manualReclaimAda()}
+            title="Cardano HTLC — refund USDM"
+            onInspect={() => void manualInspectUsdm()}
+            onReclaim={() => void manualReclaimUsdm()}
             disabledInspect={
-              !cardano || !hashValid || adaStatus.kind === 'inspecting' || adaStatus.kind === 'reclaiming'
+              !cardano || !hashValid || usdmStatus.kind === 'inspecting' || usdmStatus.kind === 'reclaiming'
             }
             body={
               <>
-                {adaStatus.kind === 'inspecting' && <InlineBusy label="Querying Blockfrost…" />}
-                {adaStatus.kind === 'not-found' && (
+                {usdmStatus.kind === 'inspecting' && <InlineBusy label="Querying Blockfrost…" />}
+                {usdmStatus.kind === 'not-found' && (
                   <Alert severity="warning">No Cardano HTLC UTxO for this hash. It may already have settled.</Alert>
                 )}
-                {adaStatus.kind === 'found' && (
+                {usdmStatus.kind === 'found' && (
                   <Stack spacing={0.5}>
-                    <Typography>Amount locked: {(Number(adaStatus.lovelace) / 1e6).toString()} ADA</Typography>
-                    <Typography>Deadline: {new Date(Number(adaStatus.deadlineMs)).toLocaleString()}</Typography>
-                    {adaStatus.expired ? (
+                    <Typography>Amount locked: {usdmStatus.usdmQty.toString()} USDM</Typography>
+                    <Typography>Deadline: {new Date(Number(usdmStatus.deadlineMs)).toLocaleString()}</Typography>
+                    {usdmStatus.expired ? (
                       <Alert severity="success">Deadline has passed — eligible for reclaim.</Alert>
                     ) : (
                       <Alert severity="warning">
                         Deadline not yet reached (~
-                        {Math.ceil((Number(adaStatus.deadlineMs) - Date.now()) / 60000)} min remaining).
+                        {Math.ceil((Number(usdmStatus.deadlineMs) - Date.now()) / 60000)} min remaining).
                       </Alert>
                     )}
                   </Stack>
                 )}
-                {adaStatus.kind === 'reclaiming' && <InlineBusy label="Submitting reclaim. Sign in Cardano wallet." />}
-                {adaStatus.kind === 'done' && (
+                {usdmStatus.kind === 'reclaiming' && <InlineBusy label="Submitting reclaim. Sign in Cardano wallet." />}
+                {usdmStatus.kind === 'done' && (
                   <Alert severity="success">
-                    Reclaimed {(Number(adaStatus.lovelace) / 1e6).toString()} ADA. Tx {adaStatus.txHash.slice(0, 24)}…
+                    Reclaimed {usdmStatus.usdmQty.toString()} USDM. Tx {usdmStatus.txHash.slice(0, 24)}…
                   </Alert>
                 )}
-                {adaStatus.kind === 'error' && <Alert severity="error">{adaStatus.message}</Alert>}
+                {usdmStatus.kind === 'error' && <Alert severity="error">{usdmStatus.message}</Alert>}
               </>
             }
-            canReclaim={adaStatus.kind === 'found' && adaStatus.expired}
+            canReclaim={usdmStatus.kind === 'found' && usdmStatus.expired}
           />
 
           <ManualChainPanel
@@ -517,13 +517,13 @@ const Section: React.FC<{
 const ReclaimRow: React.FC<{
   swap: Swap;
   rowStatus: RowStatus;
-  side: 'ada' | 'usdc';
+  side: 'usdm' | 'usdc';
   onReclaim: () => void;
   disabled?: boolean;
   disabledReason?: string;
 }> = ({ swap, rowStatus, side, onReclaim, disabled, disabledReason }) => {
   const theme = useTheme();
-  const deadlineMs = (side === 'ada' ? swap.cardanoDeadlineMs : swap.midnightDeadlineMs) ?? 0;
+  const deadlineMs = (side === 'usdm' ? swap.cardanoDeadlineMs : swap.midnightDeadlineMs) ?? 0;
 
   return (
     <Box
@@ -538,9 +538,9 @@ const ReclaimRow: React.FC<{
         <Stack sx={{ flex: 1 }}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography sx={{ fontWeight: 600 }}>
-              {side === 'ada'
-                ? `${swap.adaAmount} ADA → ${swap.usdcAmount} USDC`
-                : `${swap.usdcAmount} USDC → ${swap.adaAmount} ADA`}
+              {side === 'usdm'
+                ? `${swap.usdmAmount} USDM → ${swap.usdcAmount} USDC`
+                : `${swap.usdcAmount} USDC → ${swap.usdmAmount} USDM`}
             </Typography>
             <Chip size="small" color="error" label={`expired ${formatAgo(deadlineMs)}`} />
             <SwapStatusChip status={swap.status} />
@@ -571,7 +571,7 @@ const ReclaimRow: React.FC<{
                   disabled={disabled}
                   sx={{ whiteSpace: 'nowrap' }}
                 >
-                  Reclaim {side === 'ada' ? 'ADA' : 'USDC'}
+                  Reclaim {side === 'usdm' ? 'USDM' : 'USDC'}
                 </Button>
               </span>
             </Tooltip>

@@ -174,7 +174,7 @@ export const startMidnightWatcher = (
         const amount = hasEntry ? decoded.htlcAmounts.lookup(hashBytes) : 0n;
         const hasPreimage = decoded.revealedPreimages.member(hashBytes);
 
-        if (swap.direction === 'ada-usdc') {
+        if (swap.direction === 'usdm-usdc') {
           // Forward flow. Taker deposits on Midnight, maker claims on Midnight.
           if (swap.status === 'open') {
             if (hasEntry && amount > 0n) {

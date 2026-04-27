@@ -25,6 +25,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { alpha, useTheme } from '@mui/material/styles';
+import type { CardanoHTLCInfo } from '../../api/cardano-watcher';
 import type { FlowDirection, Role, TokenMeta } from './tokens';
 import type { UseMakerFlow, MakerStep } from './useMakerFlow';
 import type { UseTakerFlow, TakerStep } from './useTakerFlow';
@@ -60,13 +61,15 @@ interface Props {
   readonly revTaker: UseReverseTakerFlow;
 }
 
-const TX_SCAN_BASE = {
-  midnight: 'https://indexer.preprod.midnight.network/tx/',
-  cardano: 'https://preprod.cardanoscan.io/transaction/',
+// 1AM explorer for Midnight (https://explorer.1am.xyz/tx/<hash>?network=preprod);
+// CardanoScan for the Cardano leg.
+const TX_SCAN_URL: Record<'midnight' | 'cardano', (hash: string) => string> = {
+  midnight: (h) => `https://explorer.1am.xyz/tx/${h}?network=preprod`,
+  cardano: (h) => `https://preprod.cardanoscan.io/transaction/${h}`,
 };
 
 const txLink = (chain: 'midnight' | 'cardano', hash: string): React.ReactNode => (
-  <Link href={`${TX_SCAN_BASE[chain]}${hash}`} target="_blank" rel="noopener" sx={{ fontSize: 12 }}>
+  <Link href={TX_SCAN_URL[chain](hash)} target="_blank" rel="noopener" sx={{ fontSize: 12 }}>
     <code style={{ fontSize: 12 }}>
       {hash.slice(0, 8)}…{hash.slice(-6)}
     </code>{' '}
@@ -109,7 +112,7 @@ const buildForwardMakerPhases = (
   return [
     {
       id: 'lock',
-      title: 'Lock ADA on Cardano',
+      title: 'Lock USDM on Cardano',
       subtitle: lockSubtitle,
       status: state.kind === 'locking' ? 'active' : afterLock ? 'done' : state.kind === 'error' ? 'error' : 'pending',
     },
@@ -129,11 +132,20 @@ const buildForwardMakerPhases = (
     {
       id: 'claim',
       title: 'Claim USDC on Midnight',
-      subtitle: afterClaim
-        ? `Received ${state.kind === 'done' ? state.depositAmount.toString() : ''} USDC.`
-        : afterDeposit
-          ? 'Counterparty deposited — you can claim now. Claiming reveals the preimage on Midnight.'
-          : 'Waits for the counterparty deposit to appear on Midnight.',
+      subtitle: afterClaim ? (
+        <Stack spacing={0.25}>
+          <Typography variant="caption">
+            Received {state.kind === 'done' ? state.depositAmount.toString() : ''} USDC.
+          </Typography>
+          {state.kind === 'done' && state.claimTxHash && (
+            <Typography variant="caption">Claim tx: {txLink('midnight', state.claimTxHash)}</Typography>
+          )}
+        </Stack>
+      ) : afterDeposit ? (
+        'Counterparty deposited — you can claim now. Claiming reveals the preimage on Midnight.'
+      ) : (
+        'Waits for the counterparty deposit to appear on Midnight.'
+      ),
       status: state.kind === 'claiming' ? 'active' : afterClaim ? 'done' : afterDeposit ? 'active' : 'pending',
       action:
         state.kind === 'claim-ready' ? (
@@ -169,16 +181,24 @@ const buildForwardTakerPhases = (
     state.kind === 'done';
   const afterPreimage = state.kind === 'claim-ready' || state.kind === 'claiming' || state.kind === 'done';
   const afterClaim = state.kind === 'done';
+  const lockInfo = afterWatch ? (state as Extract<TakerStep, { htlcInfo: CardanoHTLCInfo }>).htlcInfo : undefined;
 
   return [
     {
       id: 'watch',
-      title: "Verify the maker's ADA lock",
+      title: "Verify the maker's USDM lock",
       subtitle:
         state.kind === 'watching-cardano'
           ? 'Scanning Cardano for the lock bound to your wallet…'
           : afterWatch
-            ? `Found: ${(Number((state as Extract<TakerStep, { htlcInfo: unknown }>).htlcInfo.amountLovelace) / 1e6).toFixed(6)} ADA locked.`
+            ? lockInfo && (
+                <Stack spacing={0.25}>
+                  <Typography variant="caption">Found: {lockInfo.amountUsdm.toString()} USDM locked.</Typography>
+                  <Typography variant="caption">
+                    Lock tx: {txLink('cardano', lockInfo.lockTxHash)}
+                  </Typography>
+                </Stack>
+              )
             : state.kind === 'unsafe-deadline'
               ? state.reason
               : 'Waiting for wallet connection.',
@@ -195,7 +215,19 @@ const buildForwardTakerPhases = (
       id: 'deposit',
       title: 'Deposit USDC on Midnight',
       subtitle: afterDeposit
-        ? 'Deposited. Your USDC is escrowed until the maker claims or your deadline passes.'
+        ? (() => {
+            const depositTx = (state as Extract<TakerStep, { depositTxHash?: string }>).depositTxHash;
+            return (
+              <Stack spacing={0.25}>
+                <Typography variant="caption">
+                  Deposited. Your USDC is escrowed until the maker claims or your deadline passes.
+                </Typography>
+                {depositTx && (
+                  <Typography variant="caption">Deposit tx: {txLink('midnight', depositTx)}</Typography>
+                )}
+              </Stack>
+            );
+          })()
         : state.kind === 'depositing'
           ? 'Sign in your Midnight wallet.'
           : state.kind === 'confirm'
@@ -239,11 +271,11 @@ const buildForwardTakerPhases = (
     },
     {
       id: 'claim',
-      title: 'Claim ADA on Cardano',
+      title: 'Claim USDM on Cardano',
       subtitle:
         state.kind === 'done' ? (
           <>
-            Received {(Number(state.htlcInfo.amountLovelace) / 1e6).toFixed(6)} ADA. Claim tx{' '}
+            Received {state.htlcInfo.amountUsdm.toString()} USDM. Claim tx{' '}
             {txLink('cardano', state.claimTxHash)}.
           </>
         ) : afterPreimage ? (
@@ -255,7 +287,7 @@ const buildForwardTakerPhases = (
       action:
         state.kind === 'claim-ready' ? (
           <AsyncButton variant="contained" color="primary" size="large" onClick={onClaim} pendingLabel="Signing…">
-            Claim ADA
+            Claim USDM
           </AsyncButton>
         ) : undefined,
     },
@@ -279,12 +311,22 @@ const buildReverseMakerPhases = (
   const afterDeposit = hasDepositInfo || state.kind === 'done';
   const afterCardanoLock = state.kind === 'claim-ready' || state.kind === 'claiming' || state.kind === 'done';
   const afterClaim = state.kind === 'done';
+  const lockInfo = state.kind === 'claim-ready' || state.kind === 'claiming' ? state.cardanoHtlc : undefined;
 
   let depositSubtitle: React.ReactNode;
   if (state.kind === 'depositing') {
     depositSubtitle = 'Please sign in your Midnight wallet.';
   } else if (hasDepositInfo) {
-    depositSubtitle = `Deposit expires ${new Date(Number(state.midnightDeadlineMs)).toLocaleString()}.`;
+    depositSubtitle = (
+      <Stack spacing={0.25}>
+        <Typography variant="caption">
+          Deposit expires {new Date(Number(state.midnightDeadlineMs)).toLocaleString()}.
+        </Typography>
+        {state.depositTxHash && (
+          <Typography variant="caption">Deposit tx: {txLink('midnight', state.depositTxHash)}</Typography>
+        )}
+      </Stack>
+    );
   } else if (state.kind === 'done') {
     depositSubtitle = 'USDC deposit done.';
   }
@@ -302,7 +344,7 @@ const buildReverseMakerPhases = (
       title: 'Share the offer',
       subtitle:
         afterDeposit && shareUrl
-          ? 'The counterparty opens this URL and locks ADA on Cardano bound to your PKH.'
+          ? 'The counterparty opens this URL and locks USDM on Cardano bound to your PKH.'
           : 'Waiting for deposit confirmation…',
       status: afterCardanoLock ? 'done' : afterDeposit && shareUrl ? 'active' : 'pending',
       action:
@@ -312,20 +354,25 @@ const buildReverseMakerPhases = (
     },
     {
       id: 'claim',
-      title: 'Claim ADA on Cardano',
+      title: 'Claim USDM on Cardano',
       subtitle:
         state.kind === 'done' ? (
           <>Claim tx {txLink('cardano', state.claimTxHash)}. Preimage revealed via tx redeemer.</>
+        ) : lockInfo ? (
+          <Stack spacing={0.25}>
+            <Typography variant="caption">Counterparty locked {lockInfo.amountUsdm.toString()} USDM.</Typography>
+            <Typography variant="caption">Lock tx: {txLink('cardano', lockInfo.lockTxHash)}</Typography>
+          </Stack>
         ) : afterCardanoLock ? (
-          'Counterparty locked ADA — claim it now. The preimage is revealed via the Cardano tx redeemer.'
+          'Counterparty locked USDM — claim it now. The preimage is revealed via the Cardano tx redeemer.'
         ) : (
-          'Waits for the counterparty to lock ADA bound to your PKH.'
+          'Waits for the counterparty to lock USDM bound to your PKH.'
         ),
       status: state.kind === 'claiming' ? 'active' : afterClaim ? 'done' : afterCardanoLock ? 'active' : 'pending',
       action:
         state.kind === 'claim-ready' ? (
           <AsyncButton variant="contained" color="primary" size="large" onClick={onClaim} pendingLabel="Signing…">
-            Claim {(Number(state.cardanoHtlc.amountLovelace) / 1e6).toFixed(6)} ADA
+            Claim {state.cardanoHtlc.amountUsdm.toString()} USDM
           </AsyncButton>
         ) : undefined,
     },
@@ -374,9 +421,9 @@ const buildReverseTakerPhases = (
     },
     {
       id: 'lock',
-      title: 'Lock ADA on Cardano',
+      title: 'Lock USDM on Cardano',
       subtitle: afterLock
-        ? 'Locked. ADA is escrowed until the maker claims it or your deadline passes.'
+        ? 'Locked. USDM is escrowed until the maker claims it or your deadline passes.'
         : state.kind === 'locking'
           ? 'Please sign in your Cardano wallet.'
           : state.kind === 'confirm'
@@ -394,7 +441,7 @@ const buildReverseTakerPhases = (
               </Alert>
             )}
             <AsyncButton variant="contained" color="primary" size="large" onClick={onAccept} pendingLabel="Preparing…">
-              Accept & lock {state.url.adaAmount.toString()} ADA
+              Accept & lock {state.url.usdmAmount.toString()} USDM
             </AsyncButton>
           </Stack>
         ) : undefined,
@@ -460,11 +507,11 @@ export const SwapProgressModal: React.FC<Props> = (props) => {
   let phases: PhaseRow[];
   let activeKind: string;
   let errorMessage: string | undefined;
-  if (role === 'maker' && flowDirection === 'ada-usdc') {
+  if (role === 'maker' && flowDirection === 'usdm-usdc') {
     phases = buildForwardMakerPhases(fwdMaker.state, fwdMaker.shareUrl, fwdMaker.claim);
     activeKind = fwdMaker.state.kind;
     errorMessage = fwdMaker.state.kind === 'error' ? fwdMaker.state.message : undefined;
-  } else if (role === 'taker' && flowDirection === 'ada-usdc') {
+  } else if (role === 'taker' && flowDirection === 'usdm-usdc') {
     phases = buildForwardTakerPhases(fwdTaker.state, fwdTaker.accept, fwdTaker.claim, usdcColor);
     activeKind = fwdTaker.state.kind;
     errorMessage =
@@ -473,7 +520,7 @@ export const SwapProgressModal: React.FC<Props> = (props) => {
         : fwdTaker.state.kind === 'unsafe-deadline'
           ? fwdTaker.state.reason
           : undefined;
-  } else if (role === 'maker' && flowDirection === 'usdc-ada') {
+  } else if (role === 'maker' && flowDirection === 'usdc-usdm') {
     phases = buildReverseMakerPhases(revMaker.state, revMaker.shareUrl, revMaker.claim);
     activeKind = revMaker.state.kind;
     errorMessage = revMaker.state.kind === 'error' ? revMaker.state.message : undefined;
@@ -494,12 +541,12 @@ export const SwapProgressModal: React.FC<Props> = (props) => {
   const title = isDone
     ? 'Swap complete'
     : role === 'maker'
-      ? flowDirection === 'ada-usdc'
-        ? 'Making an ADA → USDC offer'
-        : 'Making a USDC → ADA offer'
-      : flowDirection === 'ada-usdc'
-        ? 'Taking an ADA → USDC offer'
-        : 'Taking a USDC → ADA offer';
+      ? flowDirection === 'usdm-usdc'
+        ? 'Making a USDM → USDC offer'
+        : 'Making a USDC → USDM offer'
+      : flowDirection === 'usdm-usdc'
+        ? 'Taking a USDM → USDC offer'
+        : 'Taking a USDC → USDM offer';
 
   const subtitle = `${pay.symbol} on ${pay.chain} → ${receive.symbol} on ${receive.chain}`;
 

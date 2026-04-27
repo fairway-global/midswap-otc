@@ -1,68 +1,44 @@
 /**
- * Midswap OTC wordmark — ContraClear style.
+ * KAAMOS logo — flame icon + wordmark image.
  *
- * Two interlocking circles (Cardano-blue + Midnight-violet) echoing
- * the two chains, with "MIDSWAP OTC" in uppercase monospace.
+ * Mirrors the landing-page sticky-nav logo so the app header reads as the
+ * same brand mark (same flame asset, same wordmark, same proportions).
+ *
+ * The negative margins on the flame are intentional: the source PNG has
+ * generous transparent padding around the aurora glow, and the negative
+ * margins crop that padding visually so the mark sits tight against the
+ * wordmark — matching `.klp .logo-img--small` in `landing/LandingCSS.ts`.
  */
 
 import React from 'react';
-import { Box, Typography } from '@mui/material';
-import { alpha, useTheme } from '@mui/material/styles';
+import { Box } from '@mui/material';
 
-export const Logo: React.FC<{ compact?: boolean }> = ({ compact }) => {
-  const theme = useTheme();
-  return (
-    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, userSelect: 'none' }}>
+export const Logo: React.FC<{ compact?: boolean }> = ({ compact }) => (
+  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5, userSelect: 'none' }}>
+    <Box
+      component="img"
+      src="/kaamos-full.png"
+      alt="KAAMOS"
+      sx={{
+        height: 60,
+        width: 'auto',
+        margin: '-12px -8px -12px -4px',
+        objectFit: 'contain',
+        flexShrink: 0,
+      }}
+    />
+    {!compact && (
       <Box
-        aria-hidden="true"
+        component="img"
+        src="/kaamos-wordmark.png"
+        alt="KAAMOS"
         sx={{
-          position: 'relative',
-          width: 26,
-          height: 22,
-          display: 'inline-block',
+          height: 26,
+          width: 'auto',
+          objectFit: 'contain',
           flexShrink: 0,
         }}
-      >
-        <Box
-          sx={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            width: 17,
-            height: 17,
-            borderRadius: '50%',
-            background: 'linear-gradient(140deg, #4B8CFF, #1A4FD1)',
-            boxShadow: `0 3px 10px ${alpha('#1A4FD1', 0.45)}`,
-          }}
-        />
-        <Box
-          sx={{
-            position: 'absolute',
-            right: 0,
-            top: 3,
-            width: 17,
-            height: 17,
-            borderRadius: '50%',
-            background: 'linear-gradient(140deg, #6B7CFF, #3B1F9E)',
-            boxShadow: `0 3px 10px ${alpha('#3B1F9E', 0.45)}`,
-            mixBlendMode: 'screen',
-          }}
-        />
-      </Box>
-      {!compact && (
-        <Typography
-          component="span"
-          sx={{
-            fontWeight: 700,
-            fontSize: '0.78rem',
-            letterSpacing: '0.08em',
-            color: theme.custom.cardanoBlue,
-            textTransform: 'uppercase',
-          }}
-        >
-          Midswap OTC
-        </Typography>
-      )}
-    </Box>
-  );
-};
+      />
+    )}
+  </Box>
+);

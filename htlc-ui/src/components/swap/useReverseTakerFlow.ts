@@ -1,10 +1,10 @@
 /**
- * Reverse taker flow — USDC → ADA direction.
+ * Reverse taker flow — USDC → USDM direction.
  *
- * The taker holds Cardano ADA. They open the maker's share URL, verify the
+ * The taker holds Cardano USDM. They open the maker's share URL, verify the
  * maker's Midnight USDC deposit is bound to the taker's own Midnight
- * credentials, lock ADA on Cardano bound to the maker's PKH, wait for the
- * maker to claim ADA (which reveals the preimage via the tx redeemer), read
+ * credentials, lock USDM on Cardano bound to the maker's PKH, wait for the
+ * maker to claim USDM (which reveals the preimage via the tx redeemer), read
  * the preimage back via Blockfrost, then claim USDC on Midnight.
  *
  * Mirror of `useTakerFlow`.
@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useReducer } from 'react';
 import { useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
-import { watchForHTLCDeposit, type HTLCDepositInfo } from '../../api/midnight-watcher';
+import { watchForHTLCDeposit, watchForPreimageReveal, type HTLCDepositInfo } from '../../api/midnight-watcher';
 import { bytesToHex, hexToBytes } from '../../api/key-encoding';
 import { limits } from '../../config/limits';
 import { orchestratorClient, tryOrchestrator } from '../../api/orchestrator-client';
@@ -24,7 +24,7 @@ export interface ReverseURLInputs {
   readonly makerPkh: string;
   /** Maker's Midnight HTLC deadline (ms). The taker's Cardano deadline nests inside this. */
   readonly midnightDeadlineMs: bigint;
-  readonly adaAmount: bigint;
+  readonly usdmAmount: bigint;
   readonly usdcAmount: bigint;
 }
 
@@ -86,7 +86,21 @@ type Action =
   | { t: 'to-claiming' }
   | { t: 'to-done' }
   | { t: 'error'; message: string }
-  | { t: 'reset' };
+  | { t: 'reset' }
+  // Resume paths — on page reload, skip ahead if on-chain state is already
+  // past `locking` so we don't re-prompt the taker to lock again.
+  | {
+      t: 'resume-to-waiting-preimage';
+      midnightInfo: HTLCDepositInfo;
+      takerDeadlineMs: bigint;
+      lockTxHash: string;
+    }
+  | {
+      t: 'resume-to-claim-ready';
+      midnightInfo: HTLCDepositInfo;
+      lockTxHash: string;
+      preimageHex: string;
+    };
 
 const reducer = (state: ReverseTakerStep, action: Action): ReverseTakerStep => {
   switch (action.t) {
@@ -160,6 +174,26 @@ const reducer = (state: ReverseTakerStep, action: Action): ReverseTakerStep => {
       return { kind: 'error', message: action.message, url: 'url' in state ? state.url : undefined };
     case 'reset':
       return { kind: 'idle' };
+    case 'resume-to-waiting-preimage':
+      return state.kind === 'verifying-midnight'
+        ? {
+            kind: 'waiting-preimage',
+            url: state.url,
+            midnightInfo: action.midnightInfo,
+            takerDeadlineMs: action.takerDeadlineMs,
+            lockTxHash: action.lockTxHash,
+          }
+        : state;
+    case 'resume-to-claim-ready':
+      return state.kind === 'verifying-midnight'
+        ? {
+            kind: 'claim-ready',
+            url: state.url,
+            midnightInfo: action.midnightInfo,
+            lockTxHash: action.lockTxHash,
+            preimageHex: action.preimageHex,
+          }
+        : state;
     default:
       return state;
   }
@@ -169,17 +203,18 @@ export const parseReverseUrl = (params: URLSearchParams): ReverseURLInputs | { e
   const hashHex = (params.get('hash') ?? '').trim().toLowerCase();
   const makerPkh = (params.get('makerPkh') ?? '').trim().toLowerCase();
   const midnightDeadlineMs = params.get('midnightDeadlineMs');
-  const adaAmount = params.get('adaAmount');
+  // Read-side alias: older URLs carry `adaAmount` — accept as fallback.
+  const usdmAmount = params.get('usdmAmount') ?? params.get('adaAmount');
   const usdcAmount = params.get('usdcAmount');
   if (!/^[0-9a-f]{64}$/.test(hashHex)) return { error: 'Missing or invalid hash (64 hex).' };
   if (!/^[0-9a-f]{56}$/.test(makerPkh)) return { error: 'Missing or invalid maker Cardano PKH (56 hex).' };
-  if (!midnightDeadlineMs || !adaAmount || !usdcAmount)
-    return { error: 'Missing midnightDeadlineMs / adaAmount / usdcAmount.' };
+  if (!midnightDeadlineMs || !usdmAmount || !usdcAmount)
+    return { error: 'Missing midnightDeadlineMs / usdmAmount / usdcAmount.' };
   return {
     hashHex,
     makerPkh,
     midnightDeadlineMs: BigInt(midnightDeadlineMs),
-    adaAmount: BigInt(adaAmount),
+    usdmAmount: BigInt(usdmAmount),
     usdcAmount: BigInt(usdcAmount),
   };
 };
@@ -277,6 +312,44 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
           });
           return;
         }
+        // Resume fast-path: if we already locked USDM on Cardano in a
+        // previous session, on-chain state is ahead of the UI. Check for an
+        // existing lock (or its preimage if already claimed) and jump past
+        // `confirm`/`locking` so we don't re-prompt the user to lock.
+        try {
+          // First: has the maker already claimed? If so, preimage is in the
+          // Cardano tx redeemer and we go straight to claim-ready.
+          const preimageHex = await cardano.cardanoHtlc.findClaimPreimage(state.url.hashHex);
+          if (controller.signal.aborted) return;
+          if (preimageHex) {
+            const dbSwap = await orchestratorClient.getSwap(state.url.hashHex).catch(() => undefined);
+            dispatch({
+              t: 'resume-to-claim-ready',
+              midnightInfo: info,
+              lockTxHash: dbSwap?.cardanoLockTx ?? '',
+              preimageHex,
+            });
+            return;
+          }
+          // Otherwise: is our lock UTxO still sitting at the script address?
+          const existingLock = (await cardano.cardanoHtlc.listHTLCs()).find(
+            (h) => h.datum.preimageHash === state.url.hashHex,
+          );
+          if (controller.signal.aborted) return;
+          if (existingLock) {
+            dispatch({
+              t: 'resume-to-waiting-preimage',
+              midnightInfo: info,
+              takerDeadlineMs: existingLock.datum.deadline,
+              lockTxHash: existingLock.utxo.txHash,
+            });
+            return;
+          }
+        } catch (e) {
+          // Non-fatal — fall through to the normal confirm flow.
+          console.warn('[useReverseTakerFlow] resume check failed', e);
+        }
+
         dispatch({
           t: 'confirm',
           midnightInfo: info,
@@ -291,15 +364,15 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
     return () => controller.abort();
   }, [state, session, cardano, swapState.usdcColor]);
 
-  // Lock ADA on Cardano bound to the maker's PKH. PATCH the orchestrator with
+  // Lock USDM on Cardano bound to the maker's PKH. PATCH the orchestrator with
   // `bob_deposited` so the maker's fast-path picks it up ahead of Blockfrost.
   useEffect(() => {
     if (state.kind !== 'locking' || !cardano) return;
     void (async () => {
       try {
-        const lovelace = state.url.adaAmount * 1_000_000n;
         const txHash = await cardano.cardanoHtlc.lock(
-          lovelace,
+          state.url.usdmAmount,
+          cardano.usdmPolicy.unit,
           state.url.hashHex,
           state.url.makerPkh,
           state.takerDeadlineMs,
@@ -383,7 +456,42 @@ export const useReverseTakerFlow = (): UseReverseTakerFlow => {
     dispatch({ t: 'to-claiming' });
     try {
       const preimage = hexToBytes(state.preimageHex);
-      const claimTxHash = await session.htlcApi.withdrawWithPreimage(preimage);
+      // Verify-on-error for Lace submit timeout — see Landmine #5.
+      let submitError: unknown;
+      let claimTxHash: string | undefined;
+      try {
+        claimTxHash = await session.htlcApi.withdrawWithPreimage(preimage);
+      } catch (e) {
+        submitError = e;
+        console.warn('[useReverseTakerFlow:claim] submit surfaced error; verifying on-chain', e);
+      }
+
+      if (submitError) {
+        let claimed = false;
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 60_000);
+          await watchForPreimageReveal(
+            session.bootstrap.htlcProviders.publicDataProvider,
+            session.htlcApi.deployedContractAddress,
+            hexToBytes(state.url.hashHex),
+            5_000,
+            controller.signal,
+          );
+          clearTimeout(timer);
+          claimed = true;
+        } catch {
+          /* abort = preimage never surfaced within window */
+        }
+        if (!claimed) {
+          const msg = describeError(submitError);
+          toast.error(`Midnight claim failed: ${msg}`);
+          dispatch({ t: 'error', message: msg });
+          return;
+        }
+        toast.info('Wallet returned an error but the claim landed on-chain — continuing.');
+      }
+
       void tryOrchestrator(
         () =>
           orchestratorClient.patchSwap(state.url.hashHex, {

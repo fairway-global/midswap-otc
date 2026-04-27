@@ -49,8 +49,8 @@ export const RecoveryBanner: React.FC = () => {
     return () => clearInterval(id);
   }, []);
 
-  const { adaCount, usdcCount } = useMemo(() => {
-    let ada = 0;
+  const { usdmCount, usdcCount } = useMemo(() => {
+    let usdm = 0;
     let usdc = 0;
     const isCpkMine = (c: string | null | undefined): boolean => !!myCpk && c?.toLowerCase() === myCpk;
     const isPkhMine = (p: string | null | undefined): boolean => !!myPkh && p?.toLowerCase() === myPkh;
@@ -58,33 +58,33 @@ export const RecoveryBanner: React.FC = () => {
     const midnightExpired = (s: Swap): boolean => s.midnightDeadlineMs !== null && s.midnightDeadlineMs < nowMs;
 
     for (const s of swaps) {
-      if (s.direction === 'ada-usdc') {
-        // forward: maker locks ADA (aliceCpk); taker deposits USDC (bobCpk).
+      if (s.direction === 'usdm-usdc') {
+        // forward: maker locks USDM (aliceCpk); taker deposits USDC (bobCpk).
         if (isCpkMine(s.aliceCpk) && (s.status === 'open' || s.status === 'bob_deposited') && cardanoExpired(s)) {
-          ada++;
+          usdm++;
         }
         if (isCpkMine(s.bobCpk) && s.status === 'bob_deposited' && midnightExpired(s)) {
           usdc++;
         }
       } else {
-        // reverse: maker deposits USDC (aliceCpk); taker locks ADA (bobPkh).
+        // reverse: maker deposits USDC (aliceCpk); taker locks USDM (bobPkh).
         if (isCpkMine(s.aliceCpk) && (s.status === 'open' || s.status === 'bob_deposited') && midnightExpired(s)) {
           usdc++;
         }
         if (isPkhMine(s.bobPkh) && s.status === 'bob_deposited' && cardanoExpired(s)) {
-          ada++;
+          usdm++;
         }
       }
     }
-    return { adaCount: ada, usdcCount: usdc };
+    return { usdmCount: usdm, usdcCount: usdc };
   }, [swaps, nowMs, myCpk, myPkh]);
 
-  const total = adaCount + usdcCount;
+  const total = usdmCount + usdcCount;
   if (total === 0) return null;
   if (location.pathname === '/reclaim') return null;
 
   const parts: string[] = [];
-  if (adaCount > 0) parts.push(`${adaCount} ADA lock${adaCount === 1 ? '' : 's'}`);
+  if (usdmCount > 0) parts.push(`${usdmCount} USDM lock${usdmCount === 1 ? '' : 's'}`);
   if (usdcCount > 0) parts.push(`${usdcCount} USDC deposit${usdcCount === 1 ? '' : 's'}`);
 
   return (
