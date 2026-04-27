@@ -10,9 +10,6 @@
   },
   "workspaces": {
     "packages": [
-      "bboard-cli",
-      "bboard-ui",
-      "api",
       "contract",
       "htlc-ft-cli",
       "htlc-ui",
