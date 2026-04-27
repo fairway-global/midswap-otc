@@ -119,13 +119,11 @@ jobs:
           set -euo pipefail
           if [ ! -x "$HOME/.local/bin/compact" ]; then
             curl --proto '=https' --tlsv1.2 -LsSf \
-              https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+              https://github.com/midnightntwrk/compact/releases/download/compact-v0.5.1/compact-installer.sh | sh
           fi
           # Persist PATH for subsequent steps (installer patches ~/.bashrc, which CI doesn't source)
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
-          # Pull the actual compiler toolchain — the devtools wrapper alone isn't enough.
-          compact update
           compact --version
 
       - name: Compile Compact contracts
