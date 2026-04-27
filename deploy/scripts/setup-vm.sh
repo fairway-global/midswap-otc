@@ -33,7 +33,7 @@ set -euo pipefail
 
 # ── 0. Config ─────────────────────────────────────────────────────────────────
 # Edit these before running the script.
-DOMAIN="midotc.fairway.global"   # e.g. midswap.yourdomain.com
+DOMAIN="kaamos.fairway.global"   # e.g. midswap.yourdomain.com
 GITHUB_USERNAME="ermiappz"  # GitHub username — used to pull from GHCR
 GHCR_TOKEN="YOUR_GHCR_TOKEN"  # GitHub PAT with read:packages scope — never commit the real value here
 
