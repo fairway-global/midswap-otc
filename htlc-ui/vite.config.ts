@@ -75,6 +75,29 @@ export default defineConfig({
         return null;
       },
     },
+    // libsodium-wrappers-sumo@0.7.16 ships a wrapper that does
+    //   import e from "./libsodium-sumo.mjs"
+    // but the file isn't shipped next to the wrapper — the actual module lives
+    // in the separate `libsodium-sumo` package. Bundlers (Rollup) error with
+    // "Could not resolve ./libsodium-sumo.mjs". Redirect that relative import
+    // to the real package using Rollup's own resolver so it picks the ESM
+    // entry (libsodium-sumo/dist/modules-sumo-esm/libsodium-sumo.mjs).
+    {
+      name: 'libsodium-sumo-resolver',
+      async resolveId(source, importer) {
+        if (
+          source === './libsodium-sumo.mjs' &&
+          importer &&
+          importer.includes('libsodium-wrappers-sumo')
+        ) {
+          const resolved = await this.resolve('libsodium-sumo', importer, {
+            skipSelf: true,
+          });
+          return resolved?.id ?? null;
+        }
+        return null;
+      },
+    },
   ],
   optimizeDeps: {
     esbuildOptions: {

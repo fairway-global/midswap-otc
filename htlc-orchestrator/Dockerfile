@@ -25,10 +25,16 @@ COPY htlc-ft-cli/package.json  ./htlc-ft-cli/
 COPY htlc-ui/package.json      ./htlc-ui/
 COPY htlc-orchestrator/package.json ./htlc-orchestrator/
 
-# Install only this workspace's dependencies.
-# --workspace flag installs exactly what htlc-orchestrator/package.json declares.
-# Dependencies land in the root /app/node_modules (workspace hoisting).
-RUN npm ci --workspace=htlc-orchestrator --include-workspace-root
+# Install all workspace deps (production only). Workspace-scoped install
+# (`npm ci --workspace=htlc-orchestrator`) re-resolves peer-dep ranges under
+# @lucid-evolution/* in a stricter mode than root install and trips on
+# "Missing: @harmoniclabs/cbor@1.6.6 from lock file" — the lockfile is
+# internally consistent for root install (proven locally) but not for the
+# workspace-scoped tree. Plain `npm ci` works; the runtime stage only ships
+# the resulting node_modules so other workspaces' deps don't bloat the image
+# meaningfully (heavy deps like @midnight-ntwrk/*, lucid-evolution, etc. are
+# already orchestrator dependencies).
+RUN npm ci --omit=dev
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:24-slim AS runner
