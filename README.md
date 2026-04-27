@@ -34,7 +34,7 @@
 
 ## What This Is
 
-Kaamos Midswap OTC is a self-custodial cross-chain settlement prototype for institutional-style OTC trades. It lets two parties negotiate an RFQ, accept a quote, and settle the agreed trade across Cardano and Midnight without a custodian, bridge, or trusted escrow operator.
+Kaamos OTC is a self-custodial cross-chain settlement prototype for institutional-style OTC trades. It lets two parties negotiate an RFQ, accept a quote, and settle the agreed trade across Cardano and Midnight without a custodian, bridge, or trusted escrow operator.
 
 The current preprod implementation focuses on:
 
