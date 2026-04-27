@@ -39,7 +39,6 @@ import {
 import SettingsIcon from '@mui/icons-material/Settings';
 import SwapVertIcon from '@mui/icons-material/SwapVert';
 import CallMadeIcon from '@mui/icons-material/CallMade';
-import ContentPasteIcon from '@mui/icons-material/ContentPaste';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import { alpha, useTheme } from '@mui/material/styles';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -52,13 +51,12 @@ import { useMakerFlow } from './useMakerFlow';
 import { useTakerFlow, parseUrlInputs } from './useTakerFlow';
 import { useReverseMakerFlow } from './useReverseMakerFlow';
 import { useReverseTakerFlow, parseReverseUrl } from './useReverseTakerFlow';
-import { useSwapContext } from '../../hooks';
+import { useAuth, useSwapContext } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
 import { limits } from '../../config/limits';
 import { AsyncButton } from '../AsyncButton';
 import { decodeShieldedCoinPublicKey, decodeUnshieldedAddress } from '../../api/key-encoding';
-import { parseKeyBundle } from './keyBundle';
-import { otcApi, type Rfq, type WalletSnapshot } from '../../api/orchestrator-client';
+import { otcApi, type Rfq, type RfqSide, type WalletSnapshot } from '../../api/orchestrator-client';
 import { rfqAmounts } from '../../api/swap-bridge';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
@@ -136,6 +134,7 @@ export const SwapCard: React.FC = () => {
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
   const { session, cardano, swapState, connect, connectCardano, connecting, cardanoConnecting } = useSwapContext();
+  const { user } = useAuth();
 
   const networkId = session?.bootstrap.networkId;
 
@@ -355,6 +354,36 @@ export const SwapCard: React.FC = () => {
     }
   }, [session, cardano, connect, connectCardano, toast]);
 
+  const onCreateOrder = useCallback(async () => {
+    try {
+      if (!user) {
+        toast.info('Sign in to create an order.');
+        navigate('/login');
+        return;
+      }
+      const sell = BigInt(flowDirection === 'usdm-usdc' ? usdmAmount : usdcAmount || '0');
+      const buy = BigInt(flowDirection === 'usdm-usdc' ? usdcAmount : usdmAmount || '0');
+      if (sell <= 0n || buy <= 0n) {
+        throw new Error('Enter positive amounts for both sides.');
+      }
+      const min = parseInt(deadlineMin, 10);
+      if (!Number.isFinite(min) || min < limits.aliceMinDeadlineMin) {
+        throw new Error(`Order expiry must be ≥ ${limits.aliceMinDeadlineMin} minutes.`);
+      }
+      const side: RfqSide = flowDirection === 'usdm-usdc' ? 'sell-usdm' : 'sell-usdc';
+      const rfq = await otcApi.createRfq({
+        side,
+        sellAmount: sell.toString(),
+        indicativeBuyAmount: buy.toString(),
+        expiresInSeconds: min * 60,
+      });
+      toast.success(`Posted ${rfq.reference}`);
+      navigate(`/rfq/${rfq.id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  }, [user, flowDirection, usdmAmount, usdcAmount, deadlineMin, toast, navigate]);
+
   const onSubmitMaker = useCallback(async () => {
     try {
       const ada = BigInt(usdmAmount || '0');
@@ -448,6 +477,10 @@ export const SwapCard: React.FC = () => {
   // CTA
   // --------------------------------------------------------------------------
 
+  const usdm = Number(usdmAmount || '0');
+  const usdc = Number(usdcAmount || '0');
+  const hasAmounts = usdm > 0 && usdc > 0;
+
   let cta: React.ReactNode;
   if (role === 'taker' && urlError) {
     cta = (
@@ -461,6 +494,30 @@ export const SwapCard: React.FC = () => {
         </Button>
       </Stack>
     );
+  } else if (role === 'maker' && !rfqContext) {
+    // Create-order mode — posting an RFQ is just intent, wallets bind at
+    // quote-accept / lock time. Gate only on amounts; auth gate handled
+    // inside onCreateOrder.
+    if (!hasAmounts) {
+      cta = (
+        <Button variant="contained" color="primary" size="large" fullWidth disabled>
+          Enter amount
+        </Button>
+      );
+    } else {
+      cta = (
+        <AsyncButton
+          variant="contained"
+          color="primary"
+          size="large"
+          fullWidth
+          onClick={onCreateOrder}
+          pendingLabel="Posting order…"
+        >
+          {user ? 'Create Order' : 'Sign in to create order'}
+        </AsyncButton>
+      );
+    }
   } else if (!walletsReady) {
     cta = (
       <AsyncButton
@@ -479,23 +536,15 @@ export const SwapCard: React.FC = () => {
       </AsyncButton>
     );
   } else if (role === 'maker') {
-    const usdm = Number(usdmAmount || '0');
-    const usdc = Number(usdcAmount || '0');
-    const hasAmounts = usdm > 0 && usdc > 0;
+    // Lock-after-accept mode: counterparty wallet auto-bound from snapshot.
     const hasCounterparty =
       flowDirection === 'usdm-usdc'
         ? !!resolvedCounterpartyPkh
         : !!resolvedCounterpartyMidnightCpkBytes && !!resolvedCounterpartyMidnightUnshieldedBytes;
-    if (!hasAmounts) {
+    if (!hasAmounts || !hasCounterparty) {
       cta = (
         <Button variant="contained" color="primary" size="large" fullWidth disabled>
-          Enter amount
-        </Button>
-      );
-    } else if (!hasCounterparty) {
-      cta = (
-        <Button variant="contained" color="primary" size="large" fullWidth disabled>
-          {flowDirection === 'usdm-usdc' ? 'Enter counterparty Cardano address' : 'Enter counterparty Midnight keys'}
+          Loading order…
         </Button>
       );
     } else {
@@ -530,52 +579,6 @@ export const SwapCard: React.FC = () => {
     setSwapUiHidden(true);
     toast.info('Settlement hidden on this page. Reopen it here or recover from Order Book detail.');
   }, [toast]);
-
-  // Smart-paste: accept a `cpk:unshielded` bundle typed/pasted into either
-  // counterparty field, and split it into both fields transparently.
-  const applyMidnightKeys = useCallback((cpk: string, unshielded: string): void => {
-    setCounterpartyMidnightCpk(cpk);
-    setCounterpartyMidnightUnshielded(unshielded);
-  }, []);
-
-  const onCpkInputChange = useCallback(
-    (value: string): void => {
-      const bundle = parseKeyBundle(value);
-      if (bundle) {
-        applyMidnightKeys(bundle.cpk, bundle.unshielded);
-        return;
-      }
-      setCounterpartyMidnightCpk(value);
-    },
-    [applyMidnightKeys],
-  );
-
-  const onUnshieldedInputChange = useCallback(
-    (value: string): void => {
-      const bundle = parseKeyBundle(value);
-      if (bundle) {
-        applyMidnightKeys(bundle.cpk, bundle.unshielded);
-        return;
-      }
-      setCounterpartyMidnightUnshielded(value);
-    },
-    [applyMidnightKeys],
-  );
-
-  const onPasteBundle = useCallback(async (): Promise<void> => {
-    try {
-      const text = await navigator.clipboard.readText();
-      const bundle = parseKeyBundle(text);
-      if (!bundle) {
-        toast.error("Clipboard doesn't contain a key bundle. Expected `cpk:unshielded`.");
-        return;
-      }
-      applyMidnightKeys(bundle.cpk, bundle.unshielded);
-      toast.success('Key bundle pasted into both fields.');
-    } catch (e) {
-      toast.error(`Clipboard read failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }, [applyMidnightKeys, toast]);
 
   const directionBadge =
     role === 'maker'
@@ -711,7 +714,7 @@ export const SwapCard: React.FC = () => {
               Edits are blocked because a typo would silently desync from the
               snapshot the LP committed to (their watcher would never see the
               maker's deposit). */}
-          {role === 'maker' && flowDirection === 'usdm-usdc' && (
+          {role === 'maker' && flowDirection === 'usdm-usdc' && rfqContext && (
             <Box sx={{ mt: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                 <Typography
@@ -725,26 +728,16 @@ export const SwapCard: React.FC = () => {
                 >
                   Counterparty Wallet
                 </Typography>
-                {rfqContext && <BoundBadge reference={rfqContext.rfq.reference} />}
+                <BoundBadge reference={rfqContext.rfq.reference} />
               </Stack>
               <TextField
                 size="small"
                 fullWidth
                 label="Cardano address or PKH"
                 value={counterpartyCardano}
-                onChange={(e) => setCounterpartyCardano(e.target.value)}
                 placeholder="addr_test1… or 56-hex PKH"
-                error={!rfqContext && counterpartyCardano.trim().length > 0 && !resolvedCounterpartyPkh}
-                disabled={!!rfqContext}
-                helperText={
-                  rfqContext
-                    ? `Auto-bound from ${rfqContext.rfq.reference}. ${rfqContext.rfq.selectedProviderName ?? 'Counterparty'} will receive the USDM here.`
-                    : counterpartyCardano.trim().length === 0
-                      ? 'Bind the USDM lock to their Cardano wallet.'
-                      : resolvedCounterpartyPkh
-                        ? `PKH ${resolvedCounterpartyPkh.slice(0, 16)}…`
-                        : 'Not a valid Cardano address or 56-hex PKH.'
-                }
+                disabled
+                helperText={`Auto-bound from ${rfqContext.rfq.reference}. ${rfqContext.rfq.selectedProviderName ?? 'Counterparty'} will receive the USDM here.`}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -756,7 +749,7 @@ export const SwapCard: React.FC = () => {
             </Box>
           )}
 
-          {role === 'maker' && flowDirection === 'usdc-usdm' && (
+          {role === 'maker' && flowDirection === 'usdc-usdm' && rfqContext && (
             <Stack spacing={1.25} sx={{ mt: 2 }}>
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Typography
@@ -770,70 +763,25 @@ export const SwapCard: React.FC = () => {
                 >
                   Counterparty Midnight Keys
                 </Typography>
-                {rfqContext && <BoundBadge reference={rfqContext.rfq.reference} />}
+                <BoundBadge reference={rfqContext.rfq.reference} />
               </Stack>
-              {!rfqContext && (
-                <Stack
-                  direction="row"
-                  alignItems="center"
-                  spacing={1}
-                  sx={{
-                    p: 1,
-                    borderRadius: 1,
-                    border: `1px dashed ${theme.custom.borderSubtle}`,
-                    bgcolor: alpha(theme.custom.cardanoBlue, 0.04),
-                  }}
-                >
-                  <Typography variant="caption" sx={{ color: theme.custom.textSecondary, flex: 1 }}>
-                    Got a key bundle from the counterparty? Paste once to fill both fields.
-                  </Typography>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<ContentPasteIcon sx={{ fontSize: 13 }} />}
-                    onClick={() => void onPasteBundle()}
-                  >
-                    Paste bundle
-                  </Button>
-                </Stack>
-              )}
               <TextField
                 size="small"
                 fullWidth
                 label="Shielded coin key"
                 value={counterpartyMidnightCpk}
-                onChange={(e) => onCpkInputChange(e.target.value)}
-                placeholder="mn_shield-cpk_… or bundle cpk:unshielded"
-                error={!rfqContext && counterpartyMidnightCpk.trim().length > 0 && !resolvedCounterpartyMidnightCpkBytes}
-                disabled={!!rfqContext}
-                helperText={
-                  rfqContext
-                    ? `Auto-bound from ${rfqContext.rfq.reference}.`
-                    : counterpartyMidnightCpk.trim().length === 0
-                      ? 'Paste either the coin key alone, or the full cpk:unshielded bundle here.'
-                      : resolvedCounterpartyMidnightCpkBytes
-                        ? 'Valid shielded coin key.'
-                        : 'Not a valid bech32m coin key or 64-hex.'
-                }
+                placeholder="mn_shield-cpk_…"
+                disabled
+                helperText={`Auto-bound from ${rfqContext.rfq.reference}.`}
               />
               <TextField
                 size="small"
                 fullWidth
                 label="Unshielded address"
                 value={counterpartyMidnightUnshielded}
-                onChange={(e) => onUnshieldedInputChange(e.target.value)}
-                placeholder="mn_addr_… or 64-hex"
-                error={!rfqContext && counterpartyMidnightUnshielded.trim().length > 0 && !resolvedCounterpartyMidnightUnshieldedBytes}
-                disabled={!!rfqContext}
-                helperText={
-                  rfqContext
-                    ? `${rfqContext.rfq.selectedProviderName ?? 'Counterparty'} will receive the USDC here.`
-                    : counterpartyMidnightUnshielded.trim().length === 0
-                      ? 'Payout destination for the USDC when they claim.'
-                      : resolvedCounterpartyMidnightUnshieldedBytes
-                        ? 'Valid unshielded address.'
-                        : 'Not a valid bech32m address or 64-hex.'
-                }
+                placeholder="mn_addr_…"
+                disabled
+                helperText={`${rfqContext.rfq.selectedProviderName ?? 'Counterparty'} will receive the USDC here.`}
               />
             </Stack>
           )}

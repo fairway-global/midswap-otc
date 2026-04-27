@@ -2,7 +2,7 @@
  * OrderBook — public surface listing all OTC RFQs.
  *
  *   Polls /api/rfqs every 3s while the tab is visible (document.visibilityState).
- *   "New Order" CTA opens CreateRfqModal — gated on logged-in + wallets bound.
+ *   "New Order" CTA navigates to /app — the SwapCard is the create-order surface.
  *   Anyone can browse; signed-out users still see the book and can sign in to act.
  */
 
@@ -18,7 +18,6 @@ import {
 } from '../../api/orchestrator-client';
 import { useAuth } from '../../hooks';
 import { useToast } from '../../hooks/useToast';
-import { CreateRfqModal } from './CreateRfqModal';
 import { Panel, PanelHeader } from '../ui';
 import { RfqStatusChip } from './RfqStatusChip';
 import { ChainPair } from './ChainPair';
@@ -49,7 +48,6 @@ export const OrderBook: React.FC = () => {
   const [rfqs, setRfqs] = useState<Rfq[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('open');
-  const [createOpen, setCreateOpen] = useState(false);
 
   const fetchRfqs = useCallback(async (): Promise<void> => {
     try {
@@ -101,9 +99,7 @@ export const OrderBook: React.FC = () => {
       void navigate('/login');
       return;
     }
-    // No global wallet binding required — originator commits to a wallet
-    // when they sign the lock/deposit on /swap. RFQ-create is just intent.
-    setCreateOpen(true);
+    void navigate('/app');
   }, [user, toast, navigate]);
 
   const now = Date.now();
@@ -215,12 +211,6 @@ export const OrderBook: React.FC = () => {
           )}
         </Box>
       </Panel>
-
-      <CreateRfqModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={(rfq) => {
-        setCreateOpen(false);
-        toast.success(`Posted ${rfq.reference}`);
-        void navigate(`/rfq/${rfq.id}`);
-      }} />
     </Box>
   );
 };
